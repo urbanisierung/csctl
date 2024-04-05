@@ -49,6 +49,11 @@ toolscheck() {
     msg "${RED}helm is not installed. Please install helm first."
     exit 1
   fi
+
+  if ! command -v git &>/dev/null; then
+    msg "${RED}git is not installed. Please install git first."
+    exit 1
+  fi
 }
 
 cleanup() {

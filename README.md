@@ -12,6 +12,8 @@
   - https://kind.sigs.k8s.io/docs/user/quick-start/
 - Helm
   - https://helm.sh/docs/intro/install/
+- Git
+  - https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
 
 If you want to install Enterprise components you need to configure the following environment variables:
 
