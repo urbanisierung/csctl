@@ -7,16 +7,19 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
 usage() {
   cat <<EOF
-Usage: $(basename "${BASH_SOURCE[0]}") [-h] [-v] [-f] -p param_value arg1 [arg2...]
+Usage: $(basename "${BASH_SOURCE[0]}") [-h] [-p] [-u] [-d] [-H hostname] [-c cluster-name] [-n namespace] [profile or extra-values file]
 
-Script description here.
+Install Camunda 8 with just one command.
 
 Available options:
 
--h, --help      Print this help and exit
--v, --verbose   Print script debug info
--f, --flag      Some flag description
--p, --param     Some param description
+-h, --help        Print this help and exit
+-p, --profile     Use a profile instead of an extra-values file
+-u, --unreleased  Use unreleased helm charts
+-d, --delete      Delete the cluster
+-H, --host        Host name (default: camunda.local)
+-c, --cluster     Cluster name (default: camunda-platform-local)
+-n, --namespace   Namespace (default: camunda-platform)
 EOF
   exit
 }
@@ -51,6 +54,7 @@ parse_params() {
   param=''
   profile=0
   unreleased=0
+  cleanup=0
   host_name='camunda.local'
   extra_values='full'
   cluster_name='camunda-platform-local'
@@ -59,11 +63,10 @@ parse_params() {
   while :; do
     case "${1-}" in
     -h | --help) usage ;;
-    -v | --verbose) set -x ;;
     --no-color) NO_COLOR=1 ;;
-    -f | --flag) flag=1 ;; # example flag
     -p | --profile) profile=1 ;;
     -u | --unreleased) unreleased=1 ;;
+    -d | --delete) cleanup=1 ;;
     -H | --host)
       host_name="${2-}"
       shift
@@ -86,7 +89,6 @@ parse_params() {
 
   # check required params and arguments
   # [[ -z "${param-}" ]] && die "Missing required parameter: param"
-  [[ ${#args[@]} -eq 0 ]] && die "Missing script arguments"
 
   return 0
 }
@@ -99,11 +101,26 @@ setup_colors
 COCI_DIR="$HOME/.coci"
 COCI_CHECKOUT_DIR=$COCI_DIR/coci
 COCI_CHECKOUT_INFRA_DIR=$COCI_CHECKOUT_DIR/infra
+COCI_TLS=$COCI_DIR/tls
 
 COCI_EXTRA_VALUES=$COCI_DIR/full.yaml
 COCI_VALUES=$COCI_DIR/values.yaml
 COCI_GITHUB=https://raw.githubusercontent.com/urbanisierung/coci
 COCI_GITHUB_EXTRA_VALUES=$COCI_GITHUB/main/extra-values
+
+###########################
+# C8 CLEANUP
+
+if [ $cleanup -eq 1 ]; then
+  msg "${YELLOW}Deleting cluster $cluster_name${NOFORMAT}"
+  rm -rf $COCI_CHECKOUT_INFRA_DIR/modules/*/charts $COCI_CHECKOUT_INFRA_DIR/deployments/*/charts
+  rm -rf $COCI_CHECKOUT_INFRA_DIR/repositories/*
+  kind delete cluster --name $cluster_name
+  exit
+fi
+
+###########################
+# C8 INSTALLATION
 
 # determine extra values file
 if [ $profile -eq 1 ]; then
@@ -114,12 +131,15 @@ fi
 
 # script logic here
 
-msg "${RED}Read parameters:${NOFORMAT}"
-msg "- flag: ${flag}"
-msg "- param: ${param}"
-msg "- arguments: ${args[*]-}"
+msg "${PURPLE}Parameters:"
+msg "- cluster: ${cluster_name}"
+msg "- namespace: ${namespace}"
+msg "- host: ${host_name}"
+msg "- extra-values: ${extra_values}${NOFORMAT}"
 
 # prerequisites
+[[ ${#args[@]} -eq 0 ]] && die "Missing profile or extra-values file"
+
 if [ -d $COCI_CHECKOUT_DIR ]; then
   msg "coci repo already checked out"
 else
@@ -129,7 +149,7 @@ else
 fi
 
 # replace host name
-msg "${YELLOW}Replace host name${NOFORMAT}"
+msg "${YELLOW}Replacing host name${NOFORMAT}"
 sed 's/${HOST}/'"$host_name"'/g' $extra_values >$COCI_VALUES
 
 # unreleased helm charts
@@ -152,16 +172,23 @@ msg "${YELLOW}setting up infra${NOFORMAT}"
 kubectl kustomize --enable-helm $COCI_CHECKOUT_INFRA_DIR/modules/ingress-nginx | kubectl apply -f -
 kubectl create namespace $namespace
 kubectl config set-context --current --namespace=$namespace
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout /tmp/c8-key.key -out /tmp/c8-cert.pem
-kubectl -n $namespace create secret tls camunda-platform \
-  --cert=/tmp/c8-cert.pem \
-  --key=/tmp/c8-key.key
 
-kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
-  --namespace $namespace \
-  --docker-server "registry.camunda.cloud" \
-  --docker-username "$TEST_DOCKER_USERNAME_CAMUNDA_CLOUD" \
-  --docker-password "$TEST_DOCKER_PASSWORD_CAMUNDA_CLOUD"
+msg "${YELLOW}Generating TLS certificate${NOFORMAT}"
+mkdir -p $COCI_TLS
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout $COCI_TLS/c8-key.key -out $COCI_TLS/c8-cert.pem
+kubectl -n $namespace create secret tls camunda-platform \
+  --cert=$COCI_TLS/c8-cert.pem \
+  --key=$COCI_TLS/c8-key.key
+
+if [[ -z "${COCI_REG_USER}" ]] && [[ -z "${COCI_REG_PASS}" ]]; then
+  msg "${RED}Docker registry credentials not set. Enterprise components will not be fetched.${NOFORMAT}"
+else
+  kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
+    --namespace $namespace \
+    --docker-server "registry.camunda.cloud" \
+    --docker-username "$COCI_REG_USER" \
+    --docker-password "$COCI_REG_PASS"
+fi
 
 # c8
 msg "${YELLOW}installing c8${NOFORMAT}"
@@ -169,3 +196,11 @@ helm template camunda-platform camunda/camunda-platform --values $COCI_VALUES --
 
 # enjoy
 watch kubectl get pods
+
+msg "${BLUE}Camunda 8 installation done:"
+msg "- cluster: ${cluster_name}"
+msg "- namespace: ${namespace}"
+msg "- host: ${host_name}"
+msg "- Open console: https://${host_name}"
+msg "${RED}Make sure to add the following entry to your /etc/hosts or /private/etc/hosts file:"
+msg "127.0.0.1       ${host_name}"
