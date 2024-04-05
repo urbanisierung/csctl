@@ -10,6 +10,11 @@ usage() {
 Usage: $(basename "${BASH_SOURCE[0]}") [-h] [-p] [-u] [-d] [-H hostname] [-c cluster-name] [-n namespace] [profile or extra-values file]
 
 Install Camunda 8 with just one command.
+Full installation via:
+  coci -p full
+
+Delete installation via:
+  coci -d
 
 Available options:
 
