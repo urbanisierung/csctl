@@ -5,22 +5,25 @@ trap cleanup SIGINT SIGTERM ERR EXIT
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
+CLI_NAME=$(basename "${BASH_SOURCE[0]}")
+
 usage() {
   cat <<EOF
-Usage: $(basename "${BASH_SOURCE[0]}") [-h] [-p] [-u] [-d] [-H hostname] [-c cluster-name] [-n namespace] [profile or extra-values file]
+Usage: $CLI_NAME [-h] [-p] [-u] [-d] [-r] [-H hostname] [-c cluster-name] [-n namespace] [profile or extra-values file]
 
 Install Camunda 8 with just one command.
 Full installation via:
-  coci -p full
+  $CLI_NAME -p full
 
 Delete installation via:
-  coci -d
+  $CLI_NAME -d
 
 Available options:
 
 -h, --help        Print this help and exit
 -p, --profile     Use a profile instead of an extra-values file
 -u, --unreleased  Use unreleased helm charts
+-r, --reset       Reset local files
 -d, --delete      Delete the cluster
 -H, --host        Host name (default: camunda.local)
 -c, --cluster     Cluster name (default: camunda-platform-local)
@@ -87,6 +90,7 @@ parse_params() {
   profile=0
   unreleased=0
   cleanup=0
+  reset=0
   host_name='camunda.local'
   extra_values='full'
   cluster_name='camunda-platform-local'
@@ -99,6 +103,7 @@ parse_params() {
     -p | --profile) profile=1 ;;
     -u | --unreleased) unreleased=1 ;;
     -d | --delete) cleanup=1 ;;
+    -r | --reset) reset=1 ;;
     -H | --host)
       host_name="${2-}"
       shift
@@ -130,14 +135,15 @@ setup_colors
 
 # constants
 
-COCI_DIR="$HOME/.coci"
-COCI_CHECKOUT_DIR=$COCI_DIR/coci
+REPO_NAME="urbanisierung/coci"
+COCI_DIR="$HOME/.$CLI_NAME"
+COCI_CHECKOUT_DIR=$COCI_DIR/$CLI_NAME
 COCI_CHECKOUT_INFRA_DIR=$COCI_CHECKOUT_DIR/infra
 COCI_TLS=$COCI_DIR/tls
 
 COCI_EXTRA_VALUES=$COCI_DIR/full.yaml
 COCI_VALUES=$COCI_DIR/values.yaml
-COCI_GITHUB=https://raw.githubusercontent.com/urbanisierung/coci
+COCI_GITHUB=https://raw.githubusercontent.com/$REPO_NAME
 COCI_GITHUB_EXTRA_VALUES=$COCI_GITHUB/main/extra-values
 
 ###########################
@@ -176,12 +182,16 @@ msg "- extra-values: ${extra_values}${NOFORMAT}"
 # prerequisites
 [[ ${#args[@]} -eq 0 ]] && die "Missing profile or extra-values file"
 
+if [ $reset -eq 1 ]; then
+  rm -rf $COCI_CHECKOUT_DIR
+fi
+
 if [ -d $COCI_CHECKOUT_DIR ]; then
-  msg "coci repo already checked out"
+  msg "$CLI_NAME repo already checked out"
 else
-  msg "checking out coci repo"
+  msg "checking out $CLI_NAME repo"
   mkdir -p $COCI_CHECKOUT_DIR
-  git clone https://github.com/urbanisierung/coci.git $COCI_CHECKOUT_DIR
+  git clone https://github.com/$REPO_NAME.git $COCI_CHECKOUT_DIR
 fi
 
 # replace host name
@@ -238,5 +248,5 @@ msg "- cluster: ${cluster_name}"
 msg "- namespace: ${namespace}"
 msg "- host: ${host_name}"
 msg "- Open console: https://${host_name}"
-msg "${RED}Make sure to add the following entry to your /etc/hosts or /private/etc/hosts file:"
+msg "${ORANGE}Make sure to add the following entry to your /etc/hosts or /private/etc/hosts file:"
 msg "127.0.0.1       ${host_name}"

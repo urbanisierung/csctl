@@ -31,6 +31,9 @@ die() {
 
 setup_colors
 
+CLI_NAME="coci"
+REPO_NAME="urbanisierung/coci"
+
 TARGET_DIR="/usr/local/bin"
 if [ -w "$TARGET_DIR" ]; then
   TARGET_DIR="/usr/local/bin"
@@ -44,10 +47,10 @@ else
   PATH="$PATH:$HOME/.local/bin"
 fi
 
-msg "${YELLOW}Installing coci cli... ${NOFORMAT}"
-curl https://raw.githubusercontent.com/urbanisierung/coci/main/scripts/coci -o $TARGET_DIR/coci
-chmod +x $TARGET_DIR/coci
+msg "${YELLOW}Installing $CLI_NAME cli... ${NOFORMAT}"
+curl https://raw.githubusercontent.com/$REPO_NAME/main/scripts/$CLI_NAME -o $TARGET_DIR/$CLI_NAME
+chmod +x $TARGET_DIR/$CLI_NAME
 
-msg "${GREEN}coci cli installed successfully! ${NOFORMAT}"
+msg "${GREEN}$CLI_NAME cli installed successfully! ${NOFORMAT}"
 msg "${YELLOW}Try it out with:${NOFORMAT}"
-msg "${YELLOW}coci -h${NOFORMAT}"
+msg "${YELLOW}$CLI_NAME -h${NOFORMAT}"
