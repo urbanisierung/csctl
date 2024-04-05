@@ -1,0 +1,26 @@
+apiVersion: builtin
+kind: HelmChartInflationGenerator
+metadata:
+  name: ingress-nginx
+name: ingress-nginx
+repo: https://kubernetes.github.io/ingress-nginx
+version: 4.7.1
+releaseName: ingress-nginx
+namespace: ingress-nginx
+IncludeCRDs: true
+valuesInline:
+  controller:
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: ""
+    tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    ingressClassResource:
+      default: true
+    replicaCount: 1
+    admissionWebhooks:
+      enabled: false
+    hostNetwork: true
+    service:
+      type: NodePort

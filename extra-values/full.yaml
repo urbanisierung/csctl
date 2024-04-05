@@ -1,0 +1,100 @@
+global:
+  identity:
+    auth:
+      enabled: true
+      publicIssuerUrl: "https://${HOST}/auth/realms/camunda-platform"
+      operate:
+        redirectUrl: "https://${HOST}/operate"
+      tasklist:
+        redirectUrl: "https://${HOST}/tasklist"
+      optimize:
+        redirectUrl: "https://${HOST}/optimize"
+      console:
+        redirectUrl: "https://${HOST},http://localhost:4200"
+      webModeler:
+        redirectUrl: "https://${HOST}/modeler"
+  ingress:
+    enabled: true
+    className: ""
+    host: "${HOST}"
+    tls:
+      enabled: true
+      secretName: camunda-platform
+
+# console
+console:
+  enabled: true
+  contextPath: "/"
+  image:
+    tag: SNAPSHOT
+    pullSecrets:
+      - name: registry-camunda-cloud
+
+connectors:
+  enabled: true
+  inbound:
+    mode: disabled
+
+# Configure elastic search to make it running for local development
+elasticsearch:
+  # Request a single node with a persistent volume
+  master:
+    replicaCount: 1
+    persistence:
+      size: 15Gi
+
+identity:
+  enabled: true
+  contextPath: "/identity"
+  fullURL: "https://${HOST}/identity"
+  image:
+    tag: SNAPSHOT
+
+operate:
+  enabled: true
+  contextPath: "/operate"
+
+optimize:
+  enabled: true
+  contextPath: "/optimize"
+
+tasklist:
+  enabled: true
+  contextPath: "/tasklist"
+
+# Reduce for Zeebe and Gateway the configured replicas and with that the required resources
+# to get it running locally
+zeebe:
+  clusterSize: 1
+  partitionCount: 1
+  replicationFactor: 1
+  pvcSize: 10Gi
+
+zeebe-gateway:
+  replicas: 1
+  ingress:
+    enabled: true
+    className: ""
+    host: "zeebe.${HOST}"
+    tls:
+      enabled: true
+      secretName: camunda-platform
+
+webModeler:
+  contextPath: "/modeler"
+  enabled: true
+  image:
+    tag: latest
+    pullSecrets:
+      - name: registry-camunda-cloud
+  restapi:
+    mail:
+      smtpHost: smtp.example.com
+      smtpPort: 587
+      smtpUser: user
+      smtpPassword: secret
+      # email address to be displayed as sender of emails from Web Modeler
+      fromAddress: no-reply@example.com
+
+postgresql:
+  enabled: true
