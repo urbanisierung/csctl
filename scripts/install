@@ -37,7 +37,11 @@ if [ -w "$TARGET_DIR" ]; then
 elif [ -w "$HOME/.local/bin" ]; then
   TARGET_DIR="$HOME/.local/bin"
 else
-  die "No writeable bin directory found"
+  msg "${RED}No writeable bin directory found. Creating $HOME"/.local/bin${NOFORMAT}"
+  mkdir -p "$HOME/.local/bin"
+  TARGET_DIR="$HOME/.local/bin"
+  msg "${YELLOW}Add $HOME"/.local/bin to your PATH in bashrc, zshrc or your preferred shell!${NOFORMAT}"
+  PATH="$PATH:$HOME/.local/bin"
 fi
 
 msg "${YELLOW}Installing coci cli... ${NOFORMAT}"
