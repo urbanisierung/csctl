@@ -32,3 +32,16 @@ Camunda 8 will be installed locally with a self-signed TLS certificate. Make sur
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/urbanisierung/coci/main/scripts/install)"
 ```
+
+## Usage
+
+```bash
+# show available commands:
+coci -v
+
+# full installation:
+coci -p full
+
+# delete installation:
+coci -d
+```
