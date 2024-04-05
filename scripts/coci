@@ -24,6 +24,28 @@ EOF
   exit
 }
 
+toolscheck() {
+  if ! command -v kind &>/dev/null; then
+    msg "${RED}kind is not installed. Please install kind first."
+    exit 1
+  fi
+
+  if ! command -v docker &>/dev/null; then
+    msg "${RED}docker is not installed. Please install docker first."
+    exit 1
+  fi
+
+  if ! command -v kubectl &>/dev/null; then
+    msg "${RED}kubectl is not installed. Please install kubectl first."
+    exit 1
+  fi
+
+  if ! command -v helm &>/dev/null; then
+    msg "${RED}helm is not installed. Please install helm first."
+    exit 1
+  fi
+}
+
 cleanup() {
   trap - SIGINT SIGTERM ERR EXIT
   # script cleanup here
@@ -107,6 +129,10 @@ COCI_EXTRA_VALUES=$COCI_DIR/full.yaml
 COCI_VALUES=$COCI_DIR/values.yaml
 COCI_GITHUB=https://raw.githubusercontent.com/urbanisierung/coci
 COCI_GITHUB_EXTRA_VALUES=$COCI_GITHUB/main/extra-values
+
+###########################
+# TOOLS CHECK
+toolscheck
 
 ###########################
 # C8 CLEANUP
