@@ -19,3 +19,9 @@ If you want to install Enterprise components you need to configure the following
 export COCI_REG_USER='username'
 export COCI_REG_PASS='password'
 ```
+
+## Installation
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/urbanisierung/coci/main/scripts/install)"
+```
