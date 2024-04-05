@@ -20,6 +20,13 @@ export COCI_REG_USER='username'
 export COCI_REG_PASS='password'
 ```
 
+Camunda 8 will be installed locally with a self-signed TLS certificate. Make sure to add the host to your hosts file:
+
+```bash
+# /etc/hosts or /private/etc/hosts
+127.0.0.1       <host_name, default: camunda.local>
+```
+
 ## Installation
 
 ```bash
