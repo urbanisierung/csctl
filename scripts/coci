@@ -6,7 +6,7 @@ trap cleanup SIGINT SIGTERM ERR EXIT
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
 
 usage() {
-    cat <<EOF
+  cat <<EOF
 Usage: $(basename "${BASH_SOURCE[0]}") [-h] [-v] [-f] -p param_value arg1 [arg2...]
 
 Script description here.
@@ -18,65 +18,99 @@ Available options:
 -f, --flag      Some flag description
 -p, --param     Some param description
 EOF
-    exit
+  exit
 }
 
 cleanup() {
-    trap - SIGINT SIGTERM ERR EXIT
-    # script cleanup here
+  trap - SIGINT SIGTERM ERR EXIT
+  # script cleanup here
 }
 
 setup_colors() {
-    if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
-        NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' BLUE='\033[0;34m' PURPLE='\033[0;35m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
-    else
-        NOFORMAT='' RED='' GREEN='' ORANGE='' BLUE='' PURPLE='' CYAN='' YELLOW=''
-    fi
+  if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' BLUE='\033[0;34m' PURPLE='\033[0;35m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE='' BLUE='' PURPLE='' CYAN='' YELLOW=''
+  fi
 }
 
 msg() {
-    echo >&2 -e "${1-}"
+  echo >&2 -e "${1-}"
 }
 
 die() {
-    local msg=$1
-    local code=${2-1} # default exit status 1
-    msg "$msg"
-    exit "$code"
+  local msg=$1
+  local code=${2-1} # default exit status 1
+  msg "$msg"
+  exit "$code"
 }
 
 parse_params() {
-    # default values of variables set from params
-    flag=0
-    param=''
+  # default values of variables set from params
+  flag=0
+  param=''
+  profile=0
+  unreleased=0
+  host_name='camunda.local'
+  extra_values='full'
+  cluster_name='camunda-platform-local'
+  namespace='camunda-platform'
 
-    while :; do
-        case "${1-}" in
-        -h | --help) usage ;;
-        -v | --verbose) set -x ;;
-        --no-color) NO_COLOR=1 ;;
-        -f | --flag) flag=1 ;; # example flag
-        -p | --param)          # example named parameter
-            param="${2-}"
-            shift
-            ;;
-        -?*) die "Unknown option: $1" ;;
-        *) break ;;
-        esac
-        shift
-    done
+  while :; do
+    case "${1-}" in
+    -h | --help) usage ;;
+    -v | --verbose) set -x ;;
+    --no-color) NO_COLOR=1 ;;
+    -f | --flag) flag=1 ;; # example flag
+    -p | --profile) profile=1 ;;
+    -u | --unreleased) unreleased=1 ;;
+    -H | --host)
+      host_name="${2-}"
+      shift
+      ;;
+    -c | --cluster)
+      cluster_name="${2-}"
+      shift
+      ;;
+    -n | --namespace)
+      namespace="${2-}"
+      shift
+      ;;
+    -?*) die "Unknown option: $1" ;;
+    *) break ;;
+    esac
+    shift
+  done
 
-    args=("$@")
+  args=("$@")
 
-    # check required params and arguments
-    [[ -z "${param-}" ]] && die "Missing required parameter: param"
-    [[ ${#args[@]} -eq 0 ]] && die "Missing script arguments"
+  # check required params and arguments
+  # [[ -z "${param-}" ]] && die "Missing required parameter: param"
+  [[ ${#args[@]} -eq 0 ]] && die "Missing script arguments"
 
-    return 0
+  return 0
 }
 
 parse_params "$@"
 setup_colors
+
+# constants
+
+COCI_DIR="$HOME/.coci"
+COCI_CHECKOUT_DIR=$COCI_DIR/coci
+COCI_CHECKOUT_INFRA_DIR=$COCI_CHECKOUT_DIR/infra
+
+COCI_EXTRA_VALUES=$COCI_DIR/full.yaml
+COCI_VALUES=$COCI_DIR/values.yaml
+COCI_GITHUB=https://raw.githubusercontent.com/urbanisierung/coci
+COCI_GITHUB_EXTRA_VALUES=$COCI_GITHUB/main/extra-values
+
+# determine extra values file
+if [ $profile -eq 1 ]; then
+  extra_values=$COCI_CHECKOUT_DIR/extra-values/$args.yaml
+else
+  extra_values=$args[0]
+fi
 
 # script logic here
 
@@ -84,3 +118,54 @@ msg "${RED}Read parameters:${NOFORMAT}"
 msg "- flag: ${flag}"
 msg "- param: ${param}"
 msg "- arguments: ${args[*]-}"
+
+# prerequisites
+if [ -d $COCI_CHECKOUT_DIR ]; then
+  msg "coci repo already checked out"
+else
+  msg "checking out coci repo"
+  mkdir -p $COCI_CHECKOUT_DIR
+  git clone https://github.com/urbanisierung/coci.git $COCI_CHECKOUT_DIR
+fi
+
+# replace host name
+msg "${YELLOW}Replace host name${NOFORMAT}"
+sed 's/${HOST}/'"$host_name"'/g' $extra_values >$COCI_VALUES
+
+# unreleased helm charts
+if [ $unreleased -eq 1 ]; then
+  msg "${YELLOW}using unreleased helm charts${NOFORMAT}"
+  mkdir -p $COCI_CHECKOUT_INFRA_DIR/repositories
+  git clone https://github.com/camunda/camunda-platform-helm.git $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm
+  make -C $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm helm.dependency-update
+  rm -rf $COCI_CHECKOUT_INFRA_DIR/deployments/camunda-platform/charts/camunda-platform
+  mkdir -p $COCI_CHECKOUT_INFRA_DIR/deployments/camunda-platform/charts
+  mv $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm/charts/camunda-platform $COCI_CHECKOUT_INFRA_DIR/deployments/camunda-platform/charts/camunda-platform
+fi
+
+# cluster
+msg "${YELLOW}creating cluster${NOFORMAT}"
+kind create cluster --config $COCI_CHECKOUT_INFRA_DIR/clusters/kind/kind-cluster-config.yaml --name $cluster_name
+
+# infra
+msg "${YELLOW}setting up infra${NOFORMAT}"
+kubectl kustomize --enable-helm $COCI_CHECKOUT_INFRA_DIR/modules/ingress-nginx | kubectl apply -f -
+kubectl create namespace $namespace
+kubectl config set-context --current --namespace=$namespace
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout /tmp/c8-key.key -out /tmp/c8-cert.pem
+kubectl -n $namespace create secret tls camunda-platform \
+  --cert=/tmp/c8-cert.pem \
+  --key=/tmp/c8-key.key
+
+kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
+  --namespace $namespace \
+  --docker-server "registry.camunda.cloud" \
+  --docker-username "$TEST_DOCKER_USERNAME_CAMUNDA_CLOUD" \
+  --docker-password "$TEST_DOCKER_PASSWORD_CAMUNDA_CLOUD"
+
+# c8
+msg "${YELLOW}installing c8${NOFORMAT}"
+helm template camunda-platform camunda/camunda-platform --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
+
+# enjoy
+watch kubectl get pods
