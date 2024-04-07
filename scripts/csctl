@@ -164,6 +164,9 @@ fi
 ###########################
 # C8 INSTALLATION
 
+# prerequisites
+[[ ${#args[@]} -eq 0 ]] && die "Missing profile or extra-values file"
+
 # determine extra values file
 if [ $profile -eq 1 ]; then
   extra_values=$COCI_CHECKOUT_DIR/extra-values/$args.yaml
@@ -178,9 +181,6 @@ msg "- cluster: ${cluster_name}"
 msg "- namespace: ${namespace}"
 msg "- host: ${host_name}"
 msg "- extra-values: ${extra_values}${NOFORMAT}"
-
-# prerequisites
-[[ ${#args[@]} -eq 0 ]] && die "Missing profile or extra-values file"
 
 if [ $reset -eq 1 ]; then
   rm -rf $COCI_CHECKOUT_DIR
