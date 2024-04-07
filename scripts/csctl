@@ -226,14 +226,15 @@ kubectl -n $namespace create secret tls camunda-platform \
   --cert=$COCI_TLS/c8-cert.pem \
   --key=$COCI_TLS/c8-key.key
 
-if [[ -z "${CAMUNDA_REG_USER}" ]] && [[ -z "${CAMUNDA_REG_PASS}" ]]; then
-  msg "${RED}Docker registry credentials not set. Enterprise components will not be fetched.${NOFORMAT}"
-else
+# check if envvars exist
+if compgen -v | grep -q CAMUNDA_REG_USER && compgen -v | grep -q CAMUNDA_REG_PASS; then
   kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
     --namespace $namespace \
     --docker-server "registry.camunda.cloud" \
     --docker-username "$CAMUNDA_REG_USER" \
     --docker-password "$CAMUNDA_REG_PASS"
+else
+  msg "${RED}Docker registry credentials not set. Enterprise components will not be fetched.${NOFORMAT}"
 fi
 
 # c8
