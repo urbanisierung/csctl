@@ -25,6 +25,13 @@ console:
     tag: SNAPSHOT
     pullSecrets:
       - name: registry-camunda-cloud
+  env:
+    - name: "CAMUNDA_CONSOLE_TELEMETRY"
+      value: "download"
+    - name: "CAMUNDA_CONSOLE_CUSTOMERID"
+      value: "test"
+    - name: "CAMUNDA_CONSOLE_INSTALLATIONID"
+      value: "dev"
 
 connectors:
   enabled: true

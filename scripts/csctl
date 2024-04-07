@@ -135,7 +135,7 @@ setup_colors
 
 # constants
 
-REPO_NAME="urbanisierung/coci"
+REPO_NAME="urbanisierung/csctl"
 COCI_DIR="$HOME/.$CLI_NAME"
 COCI_CHECKOUT_DIR=$COCI_DIR/$CLI_NAME
 COCI_CHECKOUT_INFRA_DIR=$COCI_CHECKOUT_DIR/infra
@@ -226,14 +226,14 @@ kubectl -n $namespace create secret tls camunda-platform \
   --cert=$COCI_TLS/c8-cert.pem \
   --key=$COCI_TLS/c8-key.key
 
-if [[ -z "${COCI_REG_USER}" ]] && [[ -z "${COCI_REG_PASS}" ]]; then
+if [[ -z "${CAMUNDA_REG_USER}" ]] && [[ -z "${CAMUNDA_REG_PASS}" ]]; then
   msg "${RED}Docker registry credentials not set. Enterprise components will not be fetched.${NOFORMAT}"
 else
   kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
     --namespace $namespace \
     --docker-server "registry.camunda.cloud" \
-    --docker-username "$COCI_REG_USER" \
-    --docker-password "$COCI_REG_PASS"
+    --docker-username "$CAMUNDA_REG_USER" \
+    --docker-password "$CAMUNDA_REG_PASS"
 fi
 
 # c8

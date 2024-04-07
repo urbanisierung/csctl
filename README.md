@@ -1,4 +1,4 @@
-# Camunda 8 One Command Installation
+# Camunda 8 Setup Control
 
 ## Prerequisites
 
@@ -18,8 +18,8 @@
 If you want to install Enterprise components you need to configure the following environment variables:
 
 ```bash
-export COCI_REG_USER='username'
-export COCI_REG_PASS='password'
+export CAMUNDA_REG_USER='username'
+export CAMUNDA_REG_PASS='password'
 ```
 
 Camunda 8 will be installed locally with a self-signed TLS certificate. Make sure to add the host to your hosts file:
@@ -35,15 +35,17 @@ Camunda 8 will be installed locally with a self-signed TLS certificate. Make sur
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/urbanisierung/coci/main/scripts/install)"
 ```
 
+If the installation script fails, you can also simply download [csctl](./scripts/csctl), make it executable and move it to a user-wide used `bin` folder.
+
 ## Usage
 
 ```bash
 # show available commands:
-coci -v
+csctl -v
 
 # full installation:
-coci -p full
+csctl -p full
 
 # delete installation:
-coci -d
+csctl -d
 ```
