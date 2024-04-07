@@ -31,8 +31,8 @@ die() {
 
 setup_colors
 
-CLI_NAME="coci"
-REPO_NAME="urbanisierung/coci"
+CLI_NAME="csctl"
+REPO_NAME="urbanisierung/csctl"
 
 TARGET_DIR="/usr/local/bin"
 if [ -w "$TARGET_DIR" ]; then
