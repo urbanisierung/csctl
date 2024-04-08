@@ -57,6 +57,10 @@ operate:
   enabled: true
   contextPath: "/operate"
 
+optimize:
+  enabled: false
+  contextPath: "/optimize"
+
 tasklist:
   enabled: true
   contextPath: "/tasklist"
