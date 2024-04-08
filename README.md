@@ -73,3 +73,11 @@ Available profiles can be found in directory [extra-values](./extra-values/). TL
 | `md`    | x     | x       | x        |         | x       | x        | x        |
 | `sm`    | x     | x       | x        |         | x       | x        |          |
 | `xs`    | x     | x       | x        |         |         |          |          |
+
+## Under the hood
+
+`csctl` creates a new folder in your home directory: `~/.csctl`. Here you will find the following structure:
+
+- `csctl`: Checkout of this repository.
+- `tls`: Folder with created tls certificate for local installation.
+- `values.yaml`: Adjusted extra values according to configured profile (for example exchanged custom `host`).
