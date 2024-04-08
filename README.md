@@ -41,11 +41,43 @@ If the installation script fails, you can also simply download [csctl](./scripts
 
 ```bash
 # show available commands:
-csctl -v
+csctl -h
 
 # full installation:
-csctl -p full
+csctl -p lg
 
 # delete installation:
 csctl -d
 ```
+
+Available options:
+
+```bash
+Available options:
+
+-h, --help        Print this help and exit
+-p, --profile     Use a profile instead of an extra-values file
+-u, --unreleased  Use unreleased helm charts
+-r, --reset       Reset local files
+-d, --delete      Delete the cluster
+-H, --host        Host name (default: camunda.local)
+-c, --cluster     Cluster name (default: camunda-platform-local)
+-n, --namespace   Namespace (default: camunda-platform)
+```
+
+Available profiles can be found in directory [extra-values](./extra-values/). TL;DR:
+
+| Profile | Zeebe | Console | Identity | Modeler | Operate | Tasklist | Optimize |
+| ------- | ----- | ------- | -------- | ------- | ------- | -------- | -------- |
+| `lg`    | x     | x       | x        | x       | x       | x        | x        |
+| `md`    | x     | x       | x        |         | x       | x        | x        |
+| `sm`    | x     | x       | x        |         | x       | x        |          |
+| `xs`    | x     | x       | x        |         |         |          |          |
+
+## Under the hood
+
+`csctl` creates a new folder in your home directory: `~/.csctl`. Here you will find the following structure:
+
+- `csctl`: Checkout of this repository.
+- `tls`: Folder with created tls certificate for local installation.
+- `values.yaml`: Adjusted extra values according to configured profile (for example exchanged custom `host`).
