@@ -202,10 +202,12 @@ fi
 
 # replace host name
 msg "${YELLOW}Replacing host name. target: ${COCI_VALUES} ${NOFORMAT}"
-sed 's/${HOST}/'"$host_name"'/g' $extra_values >$COCI_VALUES
+sed 's/${HOST}/'"$host_name"'/g' $extra_values >${COCI_VALUES}_tmp
 
 msg "${YELLOW}Replacing console version. target: ${COCI_VALUES} ${NOFORMAT}"
-sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' $COCI_VALUES >$COCI_VALUES
+sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' ${COCI_VALUES}_tmp >$COCI_VALUES
+
+rm ${COCI_VALUES}_tmp
 
 # unreleased helm charts
 if [ $unreleased -eq 1 ]; then
