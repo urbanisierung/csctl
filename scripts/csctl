@@ -201,7 +201,7 @@ else
 fi
 
 # replace host name
-msg "${YELLOW}Replacing host name${NOFORMAT}"
+msg "${YELLOW}Replacing host name. target: ${COCI_VALUES} ${NOFORMAT}"
 sed 's/${HOST}/'"$host_name"'/g' $extra_values >$COCI_VALUES
 
 # msg "${YELLOW}Replacing console version${NOFORMAT}"
