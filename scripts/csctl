@@ -204,8 +204,8 @@ fi
 msg "${YELLOW}Replacing host name${NOFORMAT}"
 sed 's/${HOST}/'"$host_name"'/g' $extra_values >$COCI_VALUES
 
-msg "${YELLOW}Replacing console version${NOFORMAT}"
-sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' $COCI_VALUES >$COCI_VALUES
+# msg "${YELLOW}Replacing console version${NOFORMAT}"
+# sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' $COCI_VALUES >$COCI_VALUES
 
 # unreleased helm charts
 if [ $unreleased -eq 1 ]; then
