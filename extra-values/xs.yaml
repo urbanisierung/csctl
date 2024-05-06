@@ -18,7 +18,7 @@ console:
   enabled: true
   contextPath: "/"
   image:
-    tag: SNAPSHOT
+    tag: ${CONSOLE_VERSION}
     pullSecrets:
       - name: registry-camunda-cloud
   env:

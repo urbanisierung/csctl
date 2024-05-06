@@ -95,6 +95,7 @@ parse_params() {
   extra_values='full'
   cluster_name='camunda-platform-local'
   namespace='camunda-platform'
+  console_version='SNAPSHOT'
 
   while :; do
     case "${1-}" in
@@ -114,6 +115,10 @@ parse_params() {
       ;;
     -n | --namespace)
       namespace="${2-}"
+      shift
+      ;;
+    -cv | --console-version)
+      console_version="${2-}"
       shift
       ;;
     -?*) die "Unknown option: $1" ;;
@@ -197,6 +202,9 @@ fi
 # replace host name
 msg "${YELLOW}Replacing host name${NOFORMAT}"
 sed 's/${HOST}/'"$host_name"'/g' $extra_values >$COCI_VALUES
+
+msg "${YELLOW}Replacing console version${NOFORMAT}"
+sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' $COCI_VALUES >$COCI_VALUES
 
 # unreleased helm charts
 if [ $unreleased -eq 1 ]; then
