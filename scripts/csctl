@@ -185,6 +185,7 @@ msg "${PURPLE}Parameters:"
 msg "- cluster: ${cluster_name}"
 msg "- namespace: ${namespace}"
 msg "- host: ${host_name}"
+msg "- console-version: ${console_version}"
 msg "- extra-values: ${extra_values}${NOFORMAT}"
 
 if [ $reset -eq 1 ]; then
