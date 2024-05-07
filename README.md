@@ -55,14 +55,15 @@ Available options:
 ```bash
 Available options:
 
--h, --help        Print this help and exit
--p, --profile     Use a profile instead of an extra-values file
--u, --unreleased  Use unreleased helm charts
--r, --reset       Reset local files
--d, --delete      Delete the cluster
--H, --host        Host name (default: camunda.local)
--c, --cluster     Cluster name (default: camunda-platform-local)
--n, --namespace   Namespace (default: camunda-platform)
+-h,  --help             Print this help and exit
+-p,  --profile          Use a profile instead of an extra-values file
+-u,  --unreleased       Use unreleased helm charts
+-r,  --reset            Reset local files
+-d,  --delete           Delete the cluster
+-H,  --host             Host name (default: camunda.local)
+-c,  --cluster          Cluster name (default: camunda-platform-local)
+-n,  --namespace        Namespace (default: camunda-platform)
+-cv, --console-version  Console version (default: SNAPSHOT)
 ```
 
 Available profiles can be found in directory [extra-values](./extra-values/). TL;DR:
