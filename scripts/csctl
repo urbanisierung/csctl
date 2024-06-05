@@ -29,6 +29,9 @@ Available options:
 -c,  --cluster          Cluster name (default: camunda-platform-local)
 -n,  --namespace        Namespace (default: camunda-platform)
 -cv, --console-version  Console version (default: SNAPSHOT)
+-st, --skip-tls         Skip TLS certificate generation (dafault: false)
+-ds, --docker-server    Docker server (default: registry.camunda.cloud)
+-dr, --docker-registry  Docker registry (default: registry-camunda-cloud)
 EOF
   exit
 }
@@ -97,6 +100,9 @@ parse_params() {
   cluster_name='camunda-platform-local'
   namespace='camunda-platform'
   console_version='SNAPSHOT'
+  skip_tls=0
+  docker_server='registry.camunda.cloud'
+  docker_registry='registry-camunda-cloud'
 
   while :; do
     case "${1-}" in
@@ -106,6 +112,7 @@ parse_params() {
     -u | --unreleased) unreleased=1 ;;
     -d | --delete) cleanup=1 ;;
     -r | --reset) reset=1 ;;
+    -st | --skip-tls) skip_tls=1 ;;
     -H | --host)
       host_name="${2-}"
       shift
@@ -120,6 +127,14 @@ parse_params() {
       ;;
     -cv | --console-version)
       console_version="${2-}"
+      shift
+      ;;
+    -ds | --docker-server)
+      docker_server="${2-}"
+      shift
+      ;;
+    -dr | --docker-registry)
+      docker_registry="${2-}"
       shift
       ;;
     -?*) die "Unknown option: $1" ;;
@@ -177,7 +192,8 @@ fi
 if [ $profile -eq 1 ]; then
   extra_values=$COCI_CHECKOUT_DIR/extra-values/$args.yaml
 else
-  extra_values=$args[0]
+  extra_values=${args[0]}
+  COCI_VALUES=$extra_values
 fi
 
 # script logic here
@@ -187,7 +203,10 @@ msg "- cluster: ${cluster_name}"
 msg "- namespace: ${namespace}"
 msg "- host: ${host_name}"
 msg "- console-version: ${console_version}"
-msg "- extra-values: ${extra_values}${NOFORMAT}"
+msg "- extra-values: ${extra_values}"
+msg "- docker server: ${docker_server}"
+msg "- docker registry: ${docker_registry}"
+msg "- skip-tls: ${skip_tls}${NOFORMAT}"
 
 if [ $reset -eq 1 ]; then
   rm -rf $COCI_CHECKOUT_DIR
@@ -201,14 +220,16 @@ else
   git clone https://github.com/$REPO_NAME.git $COCI_CHECKOUT_DIR
 fi
 
-# replace host name
-msg "${YELLOW}Replacing host name. target: ${COCI_VALUES} ${NOFORMAT}"
-sed 's/${HOST}/'"$host_name"'/g' $extra_values >${COCI_VALUES}_tmp
+if [ $profile -eq 1 ]; then
+  # replace host name
+  msg "${YELLOW}Replacing host name. target: ${COCI_VALUES} ${NOFORMAT}"
+  sed 's/${HOST}/'"$host_name"'/g' $extra_values >${COCI_VALUES}_tmp
 
-msg "${YELLOW}Replacing console version. target: ${COCI_VALUES} ${NOFORMAT}"
-sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' ${COCI_VALUES}_tmp >$COCI_VALUES
+  msg "${YELLOW}Replacing console version. target: ${COCI_VALUES} ${NOFORMAT}"
+  sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' ${COCI_VALUES}_tmp >$COCI_VALUES
 
-rm ${COCI_VALUES}_tmp
+  rm ${COCI_VALUES}_tmp
+fi
 
 # unreleased helm charts
 if [ $unreleased -eq 1 ]; then
@@ -231,18 +252,21 @@ kubectl kustomize --enable-helm $COCI_CHECKOUT_INFRA_DIR/modules/ingress-nginx |
 kubectl create namespace $namespace
 kubectl config set-context --current --namespace=$namespace
 
-msg "${YELLOW}Generating TLS certificate${NOFORMAT}"
-mkdir -p $COCI_TLS
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout $COCI_TLS/c8-key.key -out $COCI_TLS/c8-cert.pem
-kubectl -n $namespace create secret tls camunda-platform \
-  --cert=$COCI_TLS/c8-cert.pem \
-  --key=$COCI_TLS/c8-key.key
+if [ $skip_tls -eq 0 ]; then
+  msg "${YELLOW}Generating TLS certificate${NOFORMAT}"
+  mkdir -p $COCI_TLS
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout $COCI_TLS/c8-key.key -out $COCI_TLS/c8-cert.pem
+  kubectl -n $namespace create secret tls camunda-platform \
+    --cert=$COCI_TLS/c8-cert.pem \
+    --key=$COCI_TLS/c8-key.key
+fi
 
 # check if envvars exist
 if compgen -v | grep -q CAMUNDA_REG_USER && compgen -v | grep -q CAMUNDA_REG_PASS; then
-  kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
+  msg "${YELLOW}Setting up Docker registry $docker_server credentials${NOFORMAT}"
+  kubectl -n $namespace create secret docker-registry $docker_registry \
     --namespace $namespace \
-    --docker-server "registry.camunda.cloud" \
+    --docker-server "$docker_server" \
     --docker-username "$CAMUNDA_REG_USER" \
     --docker-password "$CAMUNDA_REG_PASS"
 else
