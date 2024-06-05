@@ -31,6 +31,7 @@ Available options:
 -cv, --console-version  Console version (default: SNAPSHOT)
 -st, --skip-tls         Skip TLS certificate generation (dafault: false)
 -ds, --docker-server    Docker server (default: registry.camunda.cloud)
+-dr, --docker-registry  Docker registry (default: registry-camunda-cloud)
 EOF
   exit
 }
@@ -101,6 +102,7 @@ parse_params() {
   console_version='SNAPSHOT'
   skip_tls=0
   docker_server='registry.camunda.cloud'
+  docker_registry='registry-camunda-cloud'
 
   while :; do
     case "${1-}" in
@@ -129,6 +131,10 @@ parse_params() {
       ;;
     -ds | --docker-server)
       docker_server="${2-}"
+      shift
+      ;;
+    -dr | --docker-registry)
+      docker_registry="${2-}"
       shift
       ;;
     -?*) die "Unknown option: $1" ;;
@@ -197,7 +203,10 @@ msg "- cluster: ${cluster_name}"
 msg "- namespace: ${namespace}"
 msg "- host: ${host_name}"
 msg "- console-version: ${console_version}"
-msg "- extra-values: ${extra_values}${NOFORMAT}"
+msg "- extra-values: ${extra_values}"
+msg "- docker server: ${docker_server}"
+msg "- docker registry: ${docker_registry}"
+msg "- skip-tls: ${skip_tls}${NOFORMAT}"
 
 if [ $reset -eq 1 ]; then
   rm -rf $COCI_CHECKOUT_DIR
@@ -218,9 +227,9 @@ if [ $profile -eq 1 ]; then
 
   msg "${YELLOW}Replacing console version. target: ${COCI_VALUES} ${NOFORMAT}"
   sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' ${COCI_VALUES}_tmp >$COCI_VALUES
-fi
 
-rm ${COCI_VALUES}_tmp
+  rm ${COCI_VALUES}_tmp
+fi
 
 # unreleased helm charts
 if [ $unreleased -eq 1 ]; then
@@ -254,7 +263,8 @@ fi
 
 # check if envvars exist
 if compgen -v | grep -q CAMUNDA_REG_USER && compgen -v | grep -q CAMUNDA_REG_PASS; then
-  kubectl -n $namespace create secret docker-registry registry-camunda-cloud \
+  msg "${YELLOW}Setting up Docker registry $docker_server credentials${NOFORMAT}"
+  kubectl -n $namespace create secret docker-registry $docker_registry \
     --namespace $namespace \
     --docker-server "$docker_server" \
     --docker-username "$CAMUNDA_REG_USER" \
