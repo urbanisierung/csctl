@@ -26,12 +26,12 @@ console:
         name: ssl-certs-key
   extraVolumeMounts:
     - name: ssl-certs-certificate
-      mountPath: /var/run/certs/ca-cert.pem
-      subPath: ca-cert.pem
+      mountPath: /var/run/certs/console-cert.pem
+      subPath: console-cert.pem
       readOnly: true
     - name: ssl-certs-key
-      mountPath: /var/run/certs/ca-key.pem
-      subPath: ca-key.pem
+      mountPath: /var/run/certs/console-key.pem
+      subPath: console-key.pem
       readOnly: true
   image:
     tag: ${CONSOLE_VERSION}
@@ -47,11 +47,9 @@ console:
     - name: "SERVER_SSL_ENABLED"
       value: "true"
     - name: "SERVER_SSL_CERTIFICATE"
-      value: /var/run/certs/ca-cert.pem
+      value: /var/run/certs/console-cert.pem
     - name: "SERVER_SSL_CERTIFICATE_PRIVATE_KEY"
-      value: /var/run/certs/ca-key.pem
-    - name: "SERVER_SSL_PASSPHRASE"
-      value: "wurstbrot"
+      value: /var/run/certs/console-key.pem
 
 connectors:
   enabled: true
