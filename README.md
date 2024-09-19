@@ -82,3 +82,15 @@ Available profiles can be found in directory [extra-values](./extra-values/). TL
 - `csctl`: Checkout of this repository.
 - `tls`: Folder with created tls certificate for local installation.
 - `values.yaml`: Adjusted extra values according to configured profile (for example exchanged custom `host`).
+
+### K8s Magic
+
+```bash
+# update envvar for running pod
+kubectl set env deployment/camunda-platform-console ENVVAR_NAME=ENVVAR_VALUE
+
+# let ingress interact via https to backends
+kubectl edit ingress
+# add the following annotation:
+# nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+```

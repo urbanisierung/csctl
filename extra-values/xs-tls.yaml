@@ -50,6 +50,8 @@ console:
       value: /var/run/certs/console-cert.pem
     - name: "SERVER_SSL_CERTIFICATE_PRIVATE_KEY"
       value: /var/run/certs/console-key.key
+    - name: "CAMUNDA_CONSOLE_EXPERIMENTAL_DISABLE_AUTH"
+      value: "true"
 
 connectors:
   enabled: true
