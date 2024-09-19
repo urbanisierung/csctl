@@ -32,6 +32,7 @@ Available options:
 -st, --skip-tls         Skip TLS certificate generation (dafault: false)
 -ds, --docker-server    Docker server (default: registry.camunda.cloud)
 -dr, --docker-registry  Docker registry (default: registry-camunda-cloud)
+-tls, --tls             TLS certificate
 EOF
   exit
 }
@@ -103,6 +104,7 @@ parse_params() {
   skip_tls=0
   docker_server='registry.camunda.cloud'
   docker_registry='registry-camunda-cloud'
+  tls=0
 
   while :; do
     case "${1-}" in
@@ -113,6 +115,7 @@ parse_params() {
     -d | --delete) cleanup=1 ;;
     -r | --reset) reset=1 ;;
     -st | --skip-tls) skip_tls=1 ;;
+    -tls | --tls) tls=1 ;;
     -H | --host)
       host_name="${2-}"
       shift
@@ -271,6 +274,15 @@ if compgen -v | grep -q CAMUNDA_REG_USER && compgen -v | grep -q CAMUNDA_REG_PAS
     --docker-password "$CAMUNDA_REG_PASS"
 else
   msg "${RED}Docker registry credentials not set. Enterprise components will not be fetched.${NOFORMAT}"
+fi
+
+# TLS
+if [ $tls -eq 1 ]; then
+  msg "${YELLOW}Generating TLS certificate for Console${NOFORMAT}"
+  mkdir -p $COCI_TLS
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout $COCI_TLS/console-key.key -out $COCI_TLS/console-cert.pem
+  kubectl create configmap ssl-certs-certificate --from-file=$COCI_TLS/console-cert.pem -n $namespace
+  kubectl create configmap ssl-certs-key --from-file=$COCI_TLS/console-key.key -n $namespace
 fi
 
 # c8
