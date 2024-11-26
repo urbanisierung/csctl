@@ -169,6 +169,7 @@ COCI_EXTRA_VALUES=$COCI_DIR/full.yaml
 COCI_VALUES=$COCI_DIR/values.yaml
 COCI_GITHUB=https://raw.githubusercontent.com/$REPO_NAME
 COCI_GITHUB_EXTRA_VALUES=$COCI_GITHUB/main/extra-values
+COCI_HELM_CHARTS=camunda/camunda-platform
 
 ###########################
 # TOOLS CHECK
@@ -240,9 +241,7 @@ if [ $unreleased -eq 1 ]; then
   mkdir -p $COCI_CHECKOUT_INFRA_DIR/repositories
   git clone https://github.com/camunda/camunda-platform-helm.git $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm
   make -C $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm helm.dependency-update
-  rm -rf $COCI_CHECKOUT_INFRA_DIR/deployments/camunda-platform/charts/camunda-platform
-  mkdir -p $COCI_CHECKOUT_INFRA_DIR/deployments/camunda-platform/charts
-  mv $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm/charts/camunda-platform $COCI_CHECKOUT_INFRA_DIR/deployments/camunda-platform/charts/camunda-platform
+  COCI_HELM_CHARTS=$COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm/charts/camunda-platform-alpha
 fi
 
 # cluster
@@ -286,8 +285,8 @@ if [ $tls -eq 1 ]; then
 fi
 
 # c8
-msg "${YELLOW}installing c8${NOFORMAT}"
-helm template camunda-platform camunda/camunda-platform --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
+msg "${YELLOW}installing c8 ($COCI_HELM_CHARTS)${NOFORMAT}"
+helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
 
 # enjoy
 watch kubectl get pods

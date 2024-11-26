@@ -1,0 +1,88 @@
+global:
+  identity:
+    auth:
+      enabled: true
+      publicIssuerUrl: "https://${HOST}/auth/realms/camunda-platform"
+      console:
+        redirectUrl: "https://${HOST},http://localhost:4200"
+  ingress:
+    enabled: true
+    className: ""
+    host: "${HOST}"
+    tls:
+      enabled: true
+      secretName: camunda-platform
+
+# console
+console:
+  enabled: true
+  contextPath: "/"
+  image:
+    tag: ${CONSOLE_VERSION}
+    registry: "registry.camunda.cloud"
+    repository: "console/console-sm"
+    pullSecrets:
+      - name: registry-camunda-cloud
+  env:
+    - name: "CAMUNDA_CONSOLE_TELEMETRY"
+      value: "download"
+    - name: "CAMUNDA_CONSOLE_CUSTOMERID"
+      value: "test"
+    - name: "CAMUNDA_CONSOLE_INSTALLATIONID"
+      value: "dev"
+    - name: "CAMUNDA_LICENSE_KEY"
+      value: "insert-license"
+    - name: "CAMUNDA_CONSOLE_DISABLE_AUTH"
+      value: "true"
+    - name: "CAMUNDA_LICENSE_KEY_IS_TEST"
+      value: "true"
+
+connectors:
+  enabled: true
+  inbound:
+    mode: disabled
+
+# Configure elastic search to make it running for local development
+elasticsearch:
+  # Request a single node with a persistent volume
+  master:
+    replicaCount: 1
+    persistence:
+      size: 15Gi
+
+identity:
+  enabled: true
+  contextPath: "/identity"
+  fullURL: "https://${HOST}/identity"
+  image:
+    tag: SNAPSHOT
+
+operate:
+  enabled: false
+  contextPath: "/operate"
+
+optimize:
+  enabled: false
+  contextPath: "/optimize"
+
+tasklist:
+  enabled: false
+  contextPath: "/tasklist"
+
+# Reduce for Zeebe and Gateway the configured replicas and with that the required resources
+# to get it running locally
+zeebe:
+  clusterSize: 1
+  partitionCount: 1
+  replicationFactor: 1
+  pvcSize: 10Gi
+
+zeebe-gateway:
+  replicas: 1
+  ingress:
+    enabled: true
+    className: ""
+    host: "zeebe.${HOST}"
+    tls:
+      enabled: true
+      secretName: camunda-platform
