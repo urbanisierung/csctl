@@ -29,6 +29,15 @@ Camunda 8 will be installed locally with a self-signed TLS certificate. Make sur
 127.0.0.1       <host_name, default: camunda.local>
 ```
 
+### Helm Repository
+
+Add the camunda repo:
+
+```bash
+helm repo add camunda https://helm.camunda.io
+helm repo update
+```
+
 ## Installation
 
 ```bash
