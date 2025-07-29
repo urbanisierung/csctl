@@ -20,7 +20,7 @@ console:
   image:
     tag: ${CONSOLE_VERSION}
     registry: "registry.camunda.cloud"
-    repository: "console/console-sm"
+    repository: "team-console/console-sm"
     pullSecrets:
       - name: registry-camunda-cloud
   env:
@@ -32,8 +32,6 @@ console:
       value: "dev"
     - name: "CAMUNDA_LICENSE_KEY"
       value: "insert-license"
-    - name: "CAMUNDA_CONSOLE_DISABLE_AUTH"
-      value: "true"
     - name: "CAMUNDA_LICENSE_KEY_IS_TEST"
       value: "true"
 
