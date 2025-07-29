@@ -289,7 +289,13 @@ msg "${YELLOW}installing c8 ($COCI_HELM_CHARTS)${NOFORMAT}"
 helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
 
 # enjoy
-watch kubectl get pods
+if ! command -v watch >/dev/null 2>&1
+then
+  echo "watch could not be found"
+  kubectl get pods
+else
+  watch kubectl get pods
+fi
 
 msg "${BLUE}Camunda 8 installation done:"
 msg "- cluster: ${cluster_name}"
