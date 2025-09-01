@@ -102,4 +102,7 @@ kubectl set env deployment/camunda-platform-console ENVVAR_NAME=ENVVAR_VALUE
 kubectl edit ingress
 # add the following annotation:
 # nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+
+# get admin password for keycloak:
+kubectl get secret camunda-platform-keycloak -o jsonpath='{.data.admin-password}' | base64 -d
 ```
