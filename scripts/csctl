@@ -29,6 +29,7 @@ Available options:
 -c,  --cluster          Cluster name (default: camunda-platform-local)
 -n,  --namespace        Namespace (default: camunda-platform)
 -cv, --console-version  Console version (default: SNAPSHOT)
+-hv, --helm-version     Helm chart version to use (optional)
 -st, --skip-tls         Skip TLS certificate generation (dafault: false)
 -ds, --docker-server    Docker server (default: registry.camunda.cloud)
 -dr, --docker-registry  Docker registry (default: registry-camunda-cloud)
@@ -101,6 +102,7 @@ parse_params() {
   cluster_name='camunda-platform-local'
   namespace='camunda-platform'
   console_version='SNAPSHOT'
+  helm_version=''
   skip_tls=0
   docker_server='registry.camunda.cloud'
   docker_registry='registry-camunda-cloud'
@@ -130,6 +132,10 @@ parse_params() {
       ;;
     -cv | --console-version)
       console_version="${2-}"
+      shift
+      ;;
+    -hv | --helm-version)
+      helm_version="${2-}"
       shift
       ;;
     -ds | --docker-server)
@@ -286,7 +292,11 @@ fi
 
 # c8
 msg "${YELLOW}installing c8 ($COCI_HELM_CHARTS)${NOFORMAT}"
-helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
+if [ -n "$helm_version" ]; then
+  helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests --version "$helm_version" | kubectl apply -n $namespace -f -
+else
+  helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
+fi
 
 # enjoy
 if ! command -v watch >/dev/null 2>&1
