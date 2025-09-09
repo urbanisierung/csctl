@@ -73,6 +73,12 @@ Available options:
 -c,  --cluster          Cluster name (default: camunda-platform-local)
 -n,  --namespace        Namespace (default: camunda-platform)
 -cv, --console-version  Console version (default: SNAPSHOT)
+-hv, --helm-version     Helm chart version to use (optional)
+-st, --skip-tls         Skip TLS certificate generation (default: false)
+-ds, --docker-server    Docker server (default: registry.camunda.cloud)
+-dr, --docker-registry  Docker registry (default: registry-camunda-cloud)
+-tls, --tls             TLS certificate (generate Console cert)
+  --no-color         Disable colored output
 ```
 
 Available profiles can be found in directory [extra-values](./extra-values/). TL;DR:
