@@ -249,7 +249,7 @@ get_chart_version() {
     die "Could not determine Helm chart version from reference repo. Re-run with --version to specify a valid branch."
   fi
   local version
-  version=$(sed -n 's/.*CAMUNDA_HELM_CHART_VERSION=\([^ ]*\).*/\1/p' "$script_name" | head -1)
+  version=$(sed -n 's/.*CAMUNDA_HELM_CHART_VERSION=\([^ ]*\).*/\1/p' "$script_name" | head -1 | tr -d '"' | tr -d "'")
   if [[ -z "$version" ]]; then
     die "Could not determine Helm chart version from reference repo. Re-run with --version to specify a valid branch."
   fi
@@ -264,6 +264,7 @@ add_hosts_entry() {
   fi
   msg ""
   msg "${YELLOW}csctl needs to add '127.0.0.1 ${hostname}' to /etc/hosts.${NOFORMAT}"
+  msg "${YELLOW}This requires sudo — you may be prompted for your password.${NOFORMAT}"
   read -rp "Add entry to /etc/hosts? [y/N] " answer
   if [[ "$answer" =~ ^[Yy]$ ]]; then
     echo "127.0.0.1 ${hostname}" | sudo tee -a /etc/hosts >/dev/null
@@ -357,8 +358,13 @@ cmd_install() {
 
   # ── /etc/hosts (before certs and Helm) ──
   if [[ "$MODE" == "domain" ]]; then
-    run_step "Adding hosts entry" bash -c "cd '$WORK_DIR' && bash procedure/hosts-add.sh" \
+    msg ""
+    msg "${YELLOW}⚠ The next step requires sudo access to modify /etc/hosts.${NOFORMAT}"
+    msg "${YELLOW}  You may be prompted for your password.${NOFORMAT}"
+    msg ""
+    (cd "$WORK_DIR" && bash procedure/hosts-add.sh) \
       || die "Failed to add hosts entry."
+    complete_step "Adding hosts entry"
   else
     add_hosts_entry "camunda-keycloak"
   fi
