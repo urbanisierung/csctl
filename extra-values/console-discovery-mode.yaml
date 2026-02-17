@@ -1,0 +1,31 @@
+# Discovery mode: adds zeebe ping env vars on top of console values.
+console:
+  env:
+    - name: "CAMUNDA_CONSOLE_TELEMETRY"
+      value: "download"
+    - name: "CAMUNDA_CONSOLE_CUSTOMERID"
+      value: "test"
+    - name: "CAMUNDA_CONSOLE_INSTALLATIONID"
+      value: "dev"
+
+zeebe:
+  env:
+    - name: "CAMUNDA_CONSOLE_PING_CLUSTER_ID"
+      value: "mighty-cluster"
+    - name: "CAMUNDA_CONSOLE_PING_CLUSTERNAME"
+      value: "My Mighty Cluster"
+    - name: "CAMUNDA_CONSOLE_PING_ENABLED"
+      value: "true"
+    # Replace with your ngrok or tunnel URL
+    - name: "CAMUNDA_CONSOLE_PING_ENDPOINT"
+      value: "https://REPLACE_ME.ngrok-free.app"
+    - name: "CAMUNDA_CONSOLE_PING_PINGPERIOD"
+      value: "1s"
+    - name: "CAMUNDA_CONSOLE_PING_RETRY_MAX_RETRIES"
+      value: "10"
+    - name: "CAMUNDA_CONSOLE_PING_RETRY_MINRETRYDELAY"
+      value: "1s"
+    - name: "CAMUNDA_CONSOLE_PING_RETRY_MAXRETRYDELAY"
+      value: "10s"
+    - name: "CAMUNDA_CONSOLE_PING_RETRY_RETRYDELAYMULTIPLIER"
+      value: "2"

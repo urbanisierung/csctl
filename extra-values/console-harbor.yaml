@@ -1,0 +1,14 @@
+console:
+  enabled: true
+  image:
+    registry: "registry.camunda.cloud"
+    repository: "team-console/console-sm"
+    pullSecrets:
+      - name: registry-camunda-cloud
+  env:
+    - name: "CAMUNDA_CONSOLE_TELEMETRY"
+      value: "download"
+    - name: "CAMUNDA_CONSOLE_CUSTOMERID"
+      value: "test"
+    - name: "CAMUNDA_CONSOLE_INSTALLATIONID"
+      value: "dev"

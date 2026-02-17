@@ -1,0 +1,33 @@
+console:
+  enabled: true
+  extraVolumes:
+    - name: ssl-certs-certificate
+      configMap:
+        name: ssl-certs-certificate
+    - name: ssl-certs-key
+      configMap:
+        name: ssl-certs-key
+  extraVolumeMounts:
+    - name: ssl-certs-certificate
+      mountPath: /var/run/certs/console-cert.pem
+      subPath: console-cert.pem
+      readOnly: true
+    - name: ssl-certs-key
+      mountPath: /var/run/certs/console-key.key
+      subPath: console-key.key
+      readOnly: true
+  env:
+    - name: "CAMUNDA_CONSOLE_TELEMETRY"
+      value: "download"
+    - name: "CAMUNDA_CONSOLE_CUSTOMERID"
+      value: "test"
+    - name: "CAMUNDA_CONSOLE_INSTALLATIONID"
+      value: "dev"
+    - name: "SERVER_SSL_ENABLED"
+      value: "true"
+    - name: "SERVER_SSL_CERTIFICATE"
+      value: /var/run/certs/console-cert.pem
+    - name: "SERVER_SSL_CERTIFICATE_PRIVATE_KEY"
+      value: /var/run/certs/console-key.key
+    - name: "CAMUNDA_CONSOLE_EXPERIMENTAL_DISABLE_AUTH"
+      value: "true"

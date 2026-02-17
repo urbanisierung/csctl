@@ -1,0 +1,32 @@
+console:
+  enabled: true
+  env:
+    - name: "CAMUNDA_CONSOLE_TELEMETRY"
+      value: "download"
+    - name: "CAMUNDA_CONSOLE_CUSTOMERID"
+      value: "test"
+    - name: "CAMUNDA_CONSOLE_INSTALLATIONID"
+      value: "dev"
+    - name: "CAMUNDA_LICENSE_KEY"
+      value: "insert-license"
+    - name: "CAMUNDA_CONSOLE_DISABLE_AUTH"
+      value: "true"
+    - name: "CAMUNDA_LICENSE_KEY_IS_TEST"
+      value: "true"
+  overrideConfiguration:
+    camunda:
+      console:
+        managed:
+          releases:
+            - name: camunda-platform
+              namespace: camunda-platform
+              tags:
+                - dev
+                - custom
+              custom-properties:
+                - description: "This is the main integration environment for the Camunda Platform."
+                  links:
+                    - name: "Camunda"
+                      url: "https://camunda.com"
+                    - name: "Camunda Docs"
+                      url: "https://docs.camunda.io"
