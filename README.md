@@ -11,6 +11,7 @@ The following tools must be installed:
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Helm](https://helm.sh/docs/intro/install/)
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
+- [jq](https://jqlang.github.io/jq/download/)
 
 **Domain mode only** (default):
 
@@ -30,7 +31,7 @@ Or copy `scripts/csctl` directly to a directory already on your `PATH`.
 ## Usage
 
 ```bash
-csctl <subcommand> [flags]
+csctl [command] [flags]
 ```
 
 ### Subcommands
@@ -41,6 +42,8 @@ csctl <subcommand> [flags]
 | `delete`       | Tear down the deployment and cluster               |
 | `credentials`  | Print Keycloak admin credentials                   |
 | `port-forward` | Start port-forwarding to cluster services          |
+
+Running `csctl` with no command is equivalent to `csctl install`.
 
 ### Global flags
 
@@ -54,11 +57,7 @@ csctl <subcommand> [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--no-domain` | boolean | `false` | Use no-domain (port-forward) mode instead of domain mode |
-| `--ref <branch-or-tag>` | string | `stable/8.8` | Git branch/tag of `camunda-deployment-references` to check out |
-| `--cluster <name>` | string | `camunda-platform-local` | Kind cluster name |
-| `--namespace <name>` | string | `camunda-platform` | Kubernetes namespace |
-| `--release <name>` | string | `camunda-platform` | Helm release name |
-| `--host <hostname>` | string | `camunda.example.com` | Hostname for domain mode (ignored in no-domain mode) |
+| `--version <ref>` | string | `stable/8.8` | Git branch/tag of `camunda-deployment-references` to check out |
 | `-p <profile>` | string | _(none)_ | Profile from `extra-values/` (repeatable) |
 | `-f <file>` | string | _(none)_ | Additional Helm values file (repeatable) |
 
@@ -74,8 +73,8 @@ csctl install -p console
 # Install in no-domain mode with verbose output
 csctl install --no-domain --verbose
 
-# Install with a specific ref and custom host
-csctl install --ref stable/8.7 --host myhost.local
+# Install with a specific version and custom values
+csctl install --version stable/8.7 -f my-overrides.yaml
 
 # Combine profiles and extra values files
 csctl install -p console -p console-noauth -f my-overrides.yaml

@@ -12,10 +12,10 @@ CSCTL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_REPO_URL="https://github.com/camunda/camunda-deployment-references.git"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
-DEFAULT_REF="stable/8.8"
+DEFAULT_VERSION="stable/8.8"
 DEFAULT_CLUSTER="camunda-platform-local"
-DEFAULT_NAMESPACE="camunda-platform"
-DEFAULT_RELEASE="camunda-platform"
+DEFAULT_NAMESPACE="camunda"
+DEFAULT_RELEASE="camunda"
 DEFAULT_HOST="camunda.example.com"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -118,13 +118,15 @@ run_step() {
 # ── Usage ────────────────────────────────────────────────────────────────────
 usage() {
   cat <<EOF
-Usage: $CLI_NAME <command> [flags]
+Usage: $CLI_NAME [command] [flags]
 
 Commands:
   install       Install Camunda 8 locally (domain mode by default)
   delete        Delete the local Camunda 8 installation
   credentials   Print admin credentials
   port-forward  Forward ports to local services
+
+Running '$CLI_NAME' with no command is equivalent to '$CLI_NAME install'.
 
 Global flags:
   -h, --help      Show help
@@ -140,11 +142,7 @@ Usage: $CLI_NAME install [flags]
 
 Flags:
   --no-domain          Use no-domain (port-forward) mode instead of domain mode
-  --ref <branch/tag>   Git ref for camunda-deployment-references (default: $DEFAULT_REF)
-  --cluster <name>     Kind cluster name (default: $DEFAULT_CLUSTER)
-  --namespace <name>   Kubernetes namespace (default: $DEFAULT_NAMESPACE)
-  --release <name>     Helm release name (default: $DEFAULT_RELEASE)
-  --host <hostname>    Hostname for domain mode (default: $DEFAULT_HOST)
+  --version <ref>      Git ref for camunda-deployment-references (default: $DEFAULT_VERSION)
   -p <profile>         Profile from extra-values/ (repeatable)
   -f <file>            Additional Helm values file (repeatable)
   -v, --verbose        Show full output
@@ -185,7 +183,7 @@ EOF
 # ── Prerequisites ────────────────────────────────────────────────────────────
 check_prerequisites() {
   local missing=()
-  for tool in docker kind kubectl helm git; do
+  for tool in docker kind kubectl helm git jq; do
     command -v "$tool" &>/dev/null || missing+=("$tool")
   done
   if [[ "${1-}" != "no-domain" ]]; then
@@ -212,7 +210,8 @@ MODE="$MODE"
 CLUSTER_NAME="$CLUSTER_NAME"
 NAMESPACE="$NAMESPACE"
 RELEASE_NAME="$RELEASE_NAME"
-REF="$REF"
+VERSION="$VERSION"
+CHART_VERSION="$CHART_VERSION"
 HOST="$HOST"
 EOF
 }
@@ -222,7 +221,7 @@ export_env() {
   export CLUSTER_NAME
   export CAMUNDA_NAMESPACE="$NAMESPACE"
   export CAMUNDA_RELEASE_NAME="$RELEASE_NAME"
-  export CERT_DIR="$WORK_DIR/.certs/"
+  export CERT_DIR=".certs/"
 }
 
 # ── Clone / update reference repo ───────────────────────────────────────────
@@ -247,12 +246,12 @@ get_chart_version() {
     script_name="$WORK_DIR/procedure/camunda-deploy-no-domain.sh"
   fi
   if [[ ! -f "$script_name" ]]; then
-    die "Could not determine Helm chart version from reference repo. Re-run with --ref to specify a valid branch."
+    die "Could not determine Helm chart version from reference repo. Re-run with --version to specify a valid branch."
   fi
   local version
   version=$(sed -n 's/.*CAMUNDA_HELM_CHART_VERSION=\([^ ]*\).*/\1/p' "$script_name" | head -1)
   if [[ -z "$version" ]]; then
-    die "Could not determine Helm chart version from reference repo. Re-run with --ref to specify a valid branch."
+    die "Could not determine Helm chart version from reference repo. Re-run with --version to specify a valid branch."
   fi
   echo "$version"
 }
@@ -308,7 +307,8 @@ cmd_install() {
   NAMESPACE="$DEFAULT_NAMESPACE"
   RELEASE_NAME="$DEFAULT_RELEASE"
   HOST="$DEFAULT_HOST"
-  REF="$DEFAULT_REF"
+  VERSION="$DEFAULT_VERSION"
+  CHART_VERSION=""
   local profiles=()
   local extra_files=()
 
@@ -317,24 +317,13 @@ cmd_install() {
     case "$1" in
       -h|--help) usage_install; exit 0 ;;
       --no-domain) MODE="no-domain" ;;
-      --ref) REF="${2:?'--ref requires a value'}"; shift ;;
-      --cluster) CLUSTER_NAME="${2:?'--cluster requires a value'}"; shift ;;
-      --namespace) NAMESPACE="${2:?'--namespace requires a value'}"; shift ;;
-      --release) RELEASE_NAME="${2:?'--release requires a value'}"; shift ;;
-      --host) HOST="${2:?'--host requires a value'}"; shift ;;
+      --version) VERSION="${2:?'--version requires a value'}"; shift ;;
       -p) profiles+=("${2:?'-p requires a profile name'}"); shift ;;
       -f) extra_files+=("${2:?'-f requires a file path'}"); shift ;;
       *) die "Unknown option: $1" ;;
     esac
     shift
   done
-
-  # Validate inputs (alphanumeric, hyphens, dots only)
-  local name_re='^[a-zA-Z0-9._-]+$'
-  [[ "$CLUSTER_NAME" =~ $name_re ]] || die "Invalid cluster name: '$CLUSTER_NAME' (use alphanumeric, hyphens, dots only)"
-  [[ "$NAMESPACE" =~ $name_re ]]    || die "Invalid namespace: '$NAMESPACE' (use alphanumeric, hyphens, dots only)"
-  [[ "$RELEASE_NAME" =~ $name_re ]] || die "Invalid release name: '$RELEASE_NAME' (use alphanumeric, hyphens, dots only)"
-  [[ "$HOST" =~ $name_re ]]         || die "Invalid hostname: '$HOST' (use alphanumeric, hyphens, dots only)"
 
   # ── Prerequisites ──
   local prereq_mode="domain"
@@ -345,15 +334,14 @@ cmd_install() {
   msg ""
 
   # ── Clone/update reference repo ──
-  run_step "Cloning/updating deployment references (${REF})" setup_repo "$REF" \
+  run_step "Cloning/updating deployment references (${VERSION})" setup_repo "$VERSION" \
     || die "Failed to clone/update reference repo."
 
   # ── Extract Helm chart version ──
-  local chart_version
-  chart_version=$(get_chart_version "$MODE") \
+  CHART_VERSION=$(get_chart_version "$MODE") \
     || die "Failed to extract Helm chart version."
   if [[ "$VERBOSE" -eq 1 ]]; then
-    msg "  Helm chart version: ${chart_version}"
+    msg "  Helm chart version: ${CHART_VERSION}"
   fi
 
   # ── Helm repo setup ──
@@ -364,17 +352,33 @@ cmd_install() {
   export_env
 
   # ── Kind cluster creation ──
-  run_step "Creating Kind cluster (${CLUSTER_NAME})" bash -c "cd '$WORK_DIR' && bash procedure/setup-kind.sh" \
+  run_step "Creating Kind cluster (${CLUSTER_NAME})" bash -c "cd '$WORK_DIR' && bash procedure/cluster-create.sh" \
     || die "Failed to create Kind cluster."
 
-  # ── Ingress setup ──
-  run_step "Setting up ingress" bash -c "cd '$WORK_DIR' && bash procedure/setup-ingress.sh" \
-    || die "Failed to set up ingress."
-
-  # ── mkcert setup (domain mode only) ──
+  # ── /etc/hosts (before certs and Helm) ──
   if [[ "$MODE" == "domain" ]]; then
-    run_step "Setting up mkcert certificates" bash -c "cd '$WORK_DIR' && bash procedure/setup-mkcert.sh" \
-      || die "Failed to set up mkcert."
+    run_step "Adding hosts entry" bash -c "cd '$WORK_DIR' && bash procedure/hosts-add.sh" \
+      || die "Failed to add hosts entry."
+  else
+    add_hosts_entry "camunda-keycloak"
+  fi
+
+  # ── Domain mode: ingress, CoreDNS, mkcert certificates ──
+  if [[ "$MODE" == "domain" ]]; then
+    run_step "Setting up ingress" bash -c "cd '$WORK_DIR' && bash procedure/ingress-nginx-deploy.sh" \
+      || die "Failed to set up ingress."
+
+    run_step "Configuring CoreDNS" bash -c "cd '$WORK_DIR' && bash procedure/coredns-config.sh" \
+      || die "Failed to configure CoreDNS."
+
+    run_step "Generating TLS certificates" bash -c "cd '$WORK_DIR' && bash procedure/certs-generate.sh" \
+      || die "Failed to generate TLS certificates."
+
+    run_step "Creating TLS secret" bash -c "cd '$WORK_DIR' && bash procedure/certs-create-secret.sh" \
+      || die "Failed to create TLS secret."
+
+    run_step "Creating CA configmap" bash -c "cd '$WORK_DIR' && bash procedure/certs-create-ca-configmap.sh" \
+      || die "Failed to create CA configmap."
   fi
 
   # ── Write state file ──
@@ -385,7 +389,7 @@ cmd_install() {
   local helm_args=()
   helm_args+=(upgrade --install "$RELEASE_NAME" camunda/camunda-platform)
   helm_args+=(--namespace "$NAMESPACE" --create-namespace)
-  helm_args+=(--version "$chart_version")
+  helm_args+=(--version "$CHART_VERSION")
 
   # 1. Reference repo base values
   if [[ "$MODE" == "domain" ]]; then
@@ -414,15 +418,14 @@ cmd_install() {
   done
 
   # ── Helm install ──
-  run_step "Installing Camunda 8 via Helm (v${chart_version})" helm "${helm_args[@]}" \
+  run_step "Installing Camunda 8 via Helm (v${CHART_VERSION})" helm "${helm_args[@]}" \
     || die "Helm install failed."
 
-  # ── /etc/hosts ──
-  if [[ "$MODE" == "domain" ]]; then
-    add_hosts_entry "$HOST"
-  else
-    add_hosts_entry "camunda-keycloak"
-  fi
+  # ── Wait for pods to be ready ──
+  local ready_script="$REPO_DIR/generic/kubernetes/single-region/procedure/check-deployment-ready.sh"
+  [[ -f "$ready_script" ]] || die "Readiness check script not found: $ready_script"
+  run_step "Waiting for pods to be ready" env CAMUNDA_NAMESPACE="$NAMESPACE" bash "$ready_script" \
+    || die "Pods did not become ready."
 
   # ── Post-install output ──
   msg ""
@@ -437,13 +440,25 @@ cmd_install() {
     msg "${BLUE}Access:${NOFORMAT} https://${HOST}/"
   else
     msg "${BLUE}Access:${NOFORMAT} Run '$CLI_NAME port-forward' to forward ports."
+    msg ""
+    msg "  Zeebe gRPC API:    http://localhost:26500"
+    msg "  Zeebe REST API:    http://localhost:8080   (Operate, Tasklist, Identity)"
+    msg "  Optimize:          http://localhost:8083"
+    msg "  Web Modeler:       http://localhost:8070"
+    msg "  Connectors:        http://localhost:8088"
+    msg "  Console:           http://localhost:8087"
+    msg "  Identity:          http://localhost:8085"
+    msg "  Keycloak:          http://localhost:18080/auth"
   fi
 }
 
 print_credentials_info() {
+  local get_pw_script="$WORK_DIR/procedure/get-password.sh"
   local password
-  password=$(kubectl get secret "${RELEASE_NAME}-keycloak" -n "${NAMESPACE}" -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null) || true
-  if [[ -n "$password" ]]; then
+  if [[ -f "$get_pw_script" ]]; then
+    password=$(cd "$WORK_DIR" && bash "$get_pw_script" 2>/dev/null) || true
+  fi
+  if [[ -n "${password-}" ]]; then
     msg "${BLUE}Credentials:${NOFORMAT}"
     msg "  Username: admin"
     msg "  Password: ${password}"
@@ -465,7 +480,26 @@ cmd_delete() {
     shift
   done
 
-  load_state
+  if [[ -f "$STATE_FILE" ]]; then
+    load_state
+  else
+    # No state file — try to infer from existing Kind cluster
+    CLUSTER_NAME="$DEFAULT_CLUSTER"
+    NAMESPACE="$DEFAULT_NAMESPACE"
+    RELEASE_NAME="$DEFAULT_RELEASE"
+    HOST="$DEFAULT_HOST"
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+      msg "${YELLOW}No state file found. Detected Kind cluster '${CLUSTER_NAME}' — proceeding with defaults.${NOFORMAT}"
+      # Detect mode: check if keycloak hosts entry exists (no-domain indicator)
+      if grep -qF "127.0.0.1 camunda-keycloak" /etc/hosts 2>/dev/null; then
+        MODE="no-domain"
+      else
+        MODE="domain"
+      fi
+    else
+      die "No csctl state found and no Kind cluster '${CLUSTER_NAME}' detected. Nothing to delete."
+    fi
+  fi
   export_env
 
   msg "${BLUE}Deleting Camunda 8 installation (${MODE} mode)${NOFORMAT}"
@@ -491,6 +525,15 @@ cmd_delete() {
   else
     remove_hosts_entry "camunda-keycloak"
   fi
+  # When no state file was present, mode detection may be wrong; clean up both
+  # possible hosts entries and certs to avoid leftovers.
+  if [[ ! -f "$STATE_FILE" ]]; then
+    remove_hosts_entry "$HOST"
+    remove_hosts_entry "camunda-keycloak"
+    if [[ -d "$WORK_DIR/.certs" ]]; then
+      rm -rf "$WORK_DIR/.certs"
+    fi
+  fi
 
   # Delete state file only after successful teardown
   rm -f "$STATE_FILE"
@@ -513,10 +556,14 @@ cmd_credentials() {
   done
 
   load_state
+  export_env
 
+  local get_pw_script="$WORK_DIR/procedure/get-password.sh"
   local password
-  password=$(kubectl get secret "${RELEASE_NAME}-keycloak" -n "${NAMESPACE}" -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d 2>/dev/null) || true
-  if [[ -z "$password" ]]; then
+  if [[ -f "$get_pw_script" ]]; then
+    password=$(cd "$WORK_DIR" && bash "$get_pw_script" 2>/dev/null) || true
+  fi
+  if [[ -z "${password-}" ]]; then
     die "Could not retrieve credentials. Is the cluster running?"
   fi
 
@@ -552,10 +599,10 @@ cmd_port_forward() {
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
 main() {
-  # Handle empty invocation
+  # Handle empty invocation — default to install
   if [[ $# -eq 0 ]]; then
-    usage
-    exit 0
+    cmd_install
+    return
   fi
 
   # Extract global flags first, preserving subcommand and its flags
@@ -564,17 +611,13 @@ main() {
 
   # Handle top-level help
   if [[ $# -eq 0 ]]; then
-    usage
-    exit 0
+    # Only -v was passed, default to install with verbose
+    cmd_install
+    return
   fi
 
   local command="$1"
   shift
-
-  # Detect top-level options that aren't help flags (e.g. csctl -f foo.yaml)
-  if [[ "$command" == -* && "$command" != "-h" && "$command" != "--help" ]]; then
-    die "Unknown option or missing subcommand. Run '$CLI_NAME --help' for usage."
-  fi
 
   case "$command" in
     install)      cmd_install "$@" ;;
@@ -582,7 +625,13 @@ main() {
     credentials)  cmd_credentials "$@" ;;
     port-forward) cmd_port_forward "$@" ;;
     -h|--help)    usage; exit 0 ;;
-    *)            die "Unknown command: ${command}. Run '$CLI_NAME --help' for usage." ;;
+    # If first arg looks like an install flag, pass everything to install
+    --no-domain|--version|-p|-f)
+      cmd_install "$command" "$@" ;;
+    -*)
+      die "Unknown option: ${command}. Run '$CLI_NAME --help' for usage." ;;
+    *)
+      die "Unknown command: ${command}. Run '$CLI_NAME --help' for usage." ;;
   esac
 }
 
