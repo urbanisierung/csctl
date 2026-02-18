@@ -8,7 +8,18 @@ CONFIG_DIR="$HOME/.config/csctl"
 STATE_FILE="$CONFIG_DIR/state"
 REPO_DIR="$CONFIG_DIR/camunda-deployment-references"
 WORK_DIR="$REPO_DIR/local/kubernetes/kind-single-region"
-CSCTL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve symlinks so CSCTL_ROOT points to the real repo root
+_resolve_path() {
+  local target="$1"
+  while [[ -L "$target" ]]; do
+    local dir
+    dir="$(cd "$(dirname "$target")" && pwd)"
+    target="$(readlink "$target")"
+    [[ "$target" != /* ]] && target="$dir/$target"
+  done
+  echo "$(cd "$(dirname "$target")" && pwd)/$(basename "$target")"
+}
+CSCTL_ROOT="$(cd "$(dirname "$(_resolve_path "${BASH_SOURCE[0]}")")/.." && pwd)"
 DEPLOY_REPO_URL="https://github.com/camunda/camunda-deployment-references.git"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
@@ -125,6 +136,7 @@ Commands:
   delete        Delete the local Camunda 8 installation
   credentials   Print admin credentials
   port-forward  Forward ports to local services
+  update        Update csctl to the latest version
 
 Running '$CLI_NAME' with no command is equivalent to '$CLI_NAME install'.
 
@@ -280,7 +292,11 @@ remove_hosts_entry() {
   local escaped_hostname
   escaped_hostname=$(printf '%s' "$hostname" | sed 's/[.[\*^$()+?{|]/\\&/g')
   if grep -qF "127.0.0.1 ${hostname}" /etc/hosts 2>/dev/null; then
-    sudo sed -i "/^127\.0\.0\.1[[:space:]]\+${escaped_hostname}$/d" /etc/hosts
+    if sed --version >/dev/null 2>&1; then
+      sudo sed -i -E "/^127\\.0\\.0\\.1[[:space:]]+${escaped_hostname}$/d" /etc/hosts
+    else
+      sudo sed -i '' -E "/^127\\.0\\.0\\.1[[:space:]]+${escaped_hostname}$/d" /etc/hosts
+    fi
     msg "  ${GREEN}✓${NOFORMAT} Removed ${hostname} from /etc/hosts"
   fi
 }
@@ -407,8 +423,12 @@ cmd_install() {
   fi
 
   # 3. Profile files
+  local share_dir="${CSCTL_SHARE_DIR:-$HOME/.local/share/csctl}"
   for profile in "${profiles[@]+"${profiles[@]}"}"; do
     local profile_file="$CSCTL_ROOT/extra-values/${profile}.yaml"
+    if [[ ! -f "$profile_file" ]] && [[ -f "$share_dir/extra-values/${profile}.yaml" ]]; then
+      profile_file="$share_dir/extra-values/${profile}.yaml"
+    fi
     if [[ ! -f "$profile_file" ]]; then
       die "Profile not found: ${profile_file}"
     fi
@@ -601,6 +621,60 @@ cmd_port_forward() {
   bash procedure/port-forward.sh
 }
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── UPDATE ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+cmd_update() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<EOF
+Usage: $CLI_NAME update [flags]
+
+Updates csctl to the latest version by pulling the newest changes from the
+repository.
+
+Flags:
+  -v, --verbose   Show full output
+  -h, --help      Show this help
+EOF
+        exit 0 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+    shift
+  done
+
+  if [[ ! -d "$CSCTL_ROOT/.git" ]]; then
+    die "Cannot update: csctl was not installed from a git repository.\nRe-install with:\n  curl -fsSL https://raw.githubusercontent.com/urbanisierung/csctl/main/install.sh | bash"
+  fi
+
+  msg "${BLUE}Updating csctl...${NOFORMAT}"
+
+  if ! git -C "$CSCTL_ROOT" diff --quiet 2>/dev/null || ! git -C "$CSCTL_ROOT" diff --cached --quiet 2>/dev/null; then
+    die "Working tree has uncommitted changes. Please commit or stash them before updating."
+  fi
+
+  local current_ref
+  current_ref=$(git -C "$CSCTL_ROOT" rev-parse --short HEAD)
+
+  run_step "Fetching latest changes" git -C "$CSCTL_ROOT" fetch --all --quiet \
+    || die "Failed to fetch updates."
+
+  run_step "Applying updates" git -C "$CSCTL_ROOT" pull --ff-only --quiet \
+    || die "Failed to apply updates. Local commits may have diverged from origin/main."
+
+  local new_ref
+  new_ref=$(git -C "$CSCTL_ROOT" rev-parse --short HEAD)
+
+  msg ""
+  if [[ "$current_ref" == "$new_ref" ]]; then
+    msg "${GREEN}✓ csctl is already up to date (${new_ref}).${NOFORMAT}"
+  else
+    msg "${GREEN}✓ csctl updated: ${current_ref} → ${new_ref}${NOFORMAT}"
+  fi
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
@@ -630,6 +704,7 @@ main() {
     delete)       cmd_delete "$@" ;;
     credentials)  cmd_credentials "$@" ;;
     port-forward) cmd_port_forward "$@" ;;
+    update)       cmd_update "$@" ;;
     -h|--help)    usage; exit 0 ;;
     # If first arg looks like an install flag, pass everything to install
     --no-domain|--version|-p|-f)

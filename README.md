@@ -19,14 +19,24 @@ The following tools must be installed:
 
 ## Installation
 
-Clone this repository and add the script to your `PATH`:
+### Quick install (Linux / macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/urbanisierung/csctl/main/install.sh | bash
+```
+
+This clones the repository to `~/.local/share/csctl` and symlinks the script into `~/.local/bin/`. Re-running the command updates to the latest version.
+
+### Manual install (git clone)
 
 ```bash
 git clone https://github.com/urbanisierung/csctl.git
 export PATH="$PWD/csctl/scripts:$PATH"
 ```
 
-Or copy `scripts/csctl` directly to a directory already on your `PATH`.
+With a git-based install you can update in-place via `csctl update`.
+
+> **Windows:** csctl requires a Unix shell. Use [WSL](https://learn.microsoft.com/en-us/windows/wsl/install) to run it on Windows.
 
 ## Usage
 
@@ -42,6 +52,7 @@ csctl [command] [flags]
 | `delete`       | Tear down the deployment and cluster               |
 | `credentials`  | Print Keycloak admin credentials                   |
 | `port-forward` | Start port-forwarding to cluster services          |
+| `update`       | Update csctl to the latest version                  |
 
 Running `csctl` with no command is equivalent to `csctl install`.
 
@@ -87,6 +98,9 @@ csctl port-forward
 
 # Delete the deployment
 csctl delete
+
+# Update csctl to the latest version
+csctl update
 
 # Show help
 csctl -h
