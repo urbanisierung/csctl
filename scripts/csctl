@@ -1,316 +1,719 @@
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
-trap cleanup SIGINT SIGTERM ERR EXIT
 
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
-
-CLI_NAME=$(basename "${BASH_SOURCE[0]}")
-
-usage() {
-  cat <<EOF
-Usage: $CLI_NAME [-h] [-p] [-u] [-d] [-r] [-H hostname] [-c cluster-name] [-n namespace] [profile or extra-values file]
-
-Install Camunda 8 with just one command.
-Full installation via:
-  $CLI_NAME -p full
-
-Delete installation via:
-  $CLI_NAME -d
-
-Available options:
-
--h,  --help             Print this help and exit
--p,  --profile          Use a profile instead of an extra-values file
--u,  --unreleased       Use unreleased helm charts
--r,  --reset            Reset local files
--d,  --delete           Delete the cluster
--H,  --host             Host name (default: camunda.local)
--c,  --cluster          Cluster name (default: camunda-platform-local)
--n,  --namespace        Namespace (default: camunda-platform)
--cv, --console-version  Console version (default: SNAPSHOT)
--hv, --helm-version     Helm chart version to use (optional)
--st, --skip-tls         Skip TLS certificate generation (dafault: false)
--ds, --docker-server    Docker server (default: registry.camunda.cloud)
--dr, --docker-registry  Docker registry (default: registry-camunda-cloud)
--tls, --tls             TLS certificate
-EOF
-  exit
+# ── Constants ────────────────────────────────────────────────────────────────
+CLI_NAME="csctl"
+CONFIG_DIR="$HOME/.config/csctl"
+STATE_FILE="$CONFIG_DIR/state"
+REPO_DIR="$CONFIG_DIR/camunda-deployment-references"
+WORK_DIR="$REPO_DIR/local/kubernetes/kind-single-region"
+# Resolve symlinks so CSCTL_ROOT points to the real repo root
+_resolve_path() {
+  local target="$1"
+  while [[ -L "$target" ]]; do
+    local dir
+    dir="$(cd "$(dirname "$target")" && pwd)"
+    target="$(readlink "$target")"
+    [[ "$target" != /* ]] && target="$dir/$target"
+  done
+  echo "$(cd "$(dirname "$target")" && pwd)/$(basename "$target")"
 }
+CSCTL_ROOT="$(cd "$(dirname "$(_resolve_path "${BASH_SOURCE[0]}")")/.." && pwd)"
+DEPLOY_REPO_URL="https://github.com/camunda/camunda-deployment-references.git"
 
-toolscheck() {
-  if ! command -v kind &>/dev/null; then
-    msg "${RED}kind is not installed. Please install kind first."
-    exit 1
-  fi
+# ── Defaults ─────────────────────────────────────────────────────────────────
+DEFAULT_VERSION="stable/8.8"
+DEFAULT_CLUSTER="camunda-platform-local"
+DEFAULT_NAMESPACE="camunda"
+DEFAULT_RELEASE="camunda"
+DEFAULT_HOST="camunda.example.com"
 
-  if ! command -v docker &>/dev/null; then
-    msg "${RED}docker is not installed. Please install docker first."
-    exit 1
-  fi
-
-  if ! command -v kubectl &>/dev/null; then
-    msg "${RED}kubectl is not installed. Please install kubectl first."
-    exit 1
-  fi
-
-  if ! command -v helm &>/dev/null; then
-    msg "${RED}helm is not installed. Please install helm first."
-    exit 1
-  fi
-
-  if ! command -v git &>/dev/null; then
-    msg "${RED}git is not installed. Please install git first."
-    exit 1
-  fi
-}
-
-cleanup() {
-  trap - SIGINT SIGTERM ERR EXIT
-  # script cleanup here
-}
-
+# ── Colors ───────────────────────────────────────────────────────────────────
 setup_colors() {
   if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
-    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' BLUE='\033[0;34m' PURPLE='\033[0;35m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
+    RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' BLUE='\033[0;34m' NOFORMAT='\033[0m'
   else
-    NOFORMAT='' RED='' GREEN='' ORANGE='' BLUE='' PURPLE='' CYAN='' YELLOW=''
+    RED='' GREEN='' YELLOW='' BLUE='' NOFORMAT=''
+  fi
+}
+setup_colors
+
+# ── Globals ──────────────────────────────────────────────────────────────────
+VERBOSE=0
+SPINNER_PID=""
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+msg()  { echo >&2 -e "${1-}"; }
+die()  { msg "${RED}Error: ${1-}${NOFORMAT}"; exit "${2:-1}"; }
+
+cleanup() {
+  stop_spinner
+}
+trap cleanup EXIT
+
+# ── Spinner ──────────────────────────────────────────────────────────────────
+start_spinner() {
+  if [[ "$VERBOSE" -eq 1 ]]; then
+    msg "${BLUE}▶ ${1-}${NOFORMAT}"
+    return
+  fi
+  local label="$1"
+  (
+    local chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    while true; do
+      printf '\r\033[K  %s %s' "${chars:i%${#chars}:1}" "$label" >&2
+      i=$((i + 1))
+      sleep 0.1
+    done
+  ) &
+  SPINNER_PID=$!
+}
+
+stop_spinner() {
+  if [[ -n "${SPINNER_PID-}" ]]; then
+    kill "$SPINNER_PID" 2>/dev/null || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+    printf '\r\033[K' >&2
   fi
 }
 
-msg() {
-  echo >&2 -e "${1-}"
+complete_step() {
+  stop_spinner
+  if [[ "$VERBOSE" -eq 0 ]]; then
+    msg "  ${GREEN}✓${NOFORMAT} ${1-}"
+  fi
 }
 
-die() {
-  local msg=$1
-  local code=${2-1} # default exit status 1
-  msg "$msg"
-  exit "$code"
+fail_step() {
+  stop_spinner
+  msg "  ${RED}✗${NOFORMAT} ${1-}"
+  if [[ -n "${2-}" && -f "$2" ]]; then
+    msg "${RED}── Output ──${NOFORMAT}"
+    cat "$2" >&2
+    msg "${RED}────────────${NOFORMAT}"
+  fi
 }
 
-parse_params() {
-  # default values of variables set from params
-  flag=0
-  param=''
-  profile=0
-  unreleased=0
-  cleanup=0
-  reset=0
-  host_name='camunda.local'
-  extra_values='full'
-  cluster_name='camunda-platform-local'
-  namespace='camunda-platform'
-  console_version='SNAPSHOT'
-  helm_version=''
-  skip_tls=0
-  docker_server='registry.camunda.cloud'
-  docker_registry='registry-camunda-cloud'
-  tls=0
+run_step() {
+  local label="$1"
+  shift
+  local log
+  log=$(mktemp)
+  start_spinner "$label"
+  if [[ "$VERBOSE" -eq 1 ]]; then
+    if "$@" 2>&1 | tee "$log"; then
+      complete_step "$label"
+      rm -f "$log"
+      return 0
+    else
+      fail_step "$label"
+      rm -f "$log"
+      return 1
+    fi
+  else
+    if "$@" >"$log" 2>&1; then
+      complete_step "$label"
+      rm -f "$log"
+      return 0
+    else
+      fail_step "$label" "$log"
+      rm -f "$log"
+      return 1
+    fi
+  fi
+}
 
-  while :; do
-    case "${1-}" in
-    -h | --help) usage ;;
-    --no-color) NO_COLOR=1 ;;
-    -p | --profile) profile=1 ;;
-    -u | --unreleased) unreleased=1 ;;
-    -d | --delete) cleanup=1 ;;
-    -r | --reset) reset=1 ;;
-    -st | --skip-tls) skip_tls=1 ;;
-    -tls | --tls) tls=1 ;;
-    -H | --host)
-      host_name="${2-}"
-      shift
-      ;;
-    -c | --cluster)
-      cluster_name="${2-}"
-      shift
-      ;;
-    -n | --namespace)
-      namespace="${2-}"
-      shift
-      ;;
-    -cv | --console-version)
-      console_version="${2-}"
-      shift
-      ;;
-    -hv | --helm-version)
-      helm_version="${2-}"
-      shift
-      ;;
-    -ds | --docker-server)
-      docker_server="${2-}"
-      shift
-      ;;
-    -dr | --docker-registry)
-      docker_registry="${2-}"
-      shift
-      ;;
-    -?*) die "Unknown option: $1" ;;
-    *) break ;;
+# ── Usage ────────────────────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+Usage: $CLI_NAME [command] [flags]
+
+Commands:
+  install       Install Camunda 8 locally (domain mode by default)
+  delete        Delete the local Camunda 8 installation
+  credentials   Print admin credentials
+  port-forward  Forward ports to local services
+  update        Update csctl to the latest version
+
+Running '$CLI_NAME' with no command is equivalent to '$CLI_NAME install'.
+
+Global flags:
+  -h, --help      Show help
+  -v, --verbose   Show full output instead of spinner UI
+
+Run '$CLI_NAME <command> --help' for command-specific help.
+EOF
+}
+
+usage_install() {
+  cat <<EOF
+Usage: $CLI_NAME install [flags]
+
+Flags:
+  --no-domain          Use no-domain (port-forward) mode instead of domain mode
+  --version <ref>      Git ref for camunda-deployment-references (default: $DEFAULT_VERSION)
+  -p <profile>         Profile from extra-values/ (repeatable)
+  -f <file>            Additional Helm values file (repeatable)
+  -v, --verbose        Show full output
+  -h, --help           Show this help
+EOF
+}
+
+usage_delete() {
+  cat <<EOF
+Usage: $CLI_NAME delete [flags]
+
+Flags:
+  -v, --verbose   Show full output
+  -h, --help      Show this help
+EOF
+}
+
+usage_credentials() {
+  cat <<EOF
+Usage: $CLI_NAME credentials [flags]
+
+Flags:
+  -v, --verbose   Show full output
+  -h, --help      Show this help
+EOF
+}
+
+usage_portforward() {
+  cat <<EOF
+Usage: $CLI_NAME port-forward [flags]
+
+Flags:
+  -v, --verbose   Show full output
+  -h, --help      Show this help
+EOF
+}
+
+# ── Prerequisites ────────────────────────────────────────────────────────────
+check_prerequisites() {
+  local missing=()
+  for tool in docker kind kubectl helm git jq; do
+    command -v "$tool" &>/dev/null || missing+=("$tool")
+  done
+  if [[ "${1-}" != "no-domain" ]]; then
+    command -v mkcert &>/dev/null || missing+=("mkcert")
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "Missing required tools: ${missing[*]}. Please install them first."
+  fi
+}
+
+# ── State file ───────────────────────────────────────────────────────────────
+load_state() {
+  if [[ ! -f "$STATE_FILE" ]]; then
+    die "No csctl state found. Run 'csctl install' first."
+  fi
+  # shellcheck disable=SC1090
+  source "$STATE_FILE"
+}
+
+write_state() {
+  mkdir -p "$CONFIG_DIR"
+  cat >"$STATE_FILE" <<EOF
+MODE="$MODE"
+CLUSTER_NAME="$CLUSTER_NAME"
+NAMESPACE="$NAMESPACE"
+RELEASE_NAME="$RELEASE_NAME"
+VERSION="$VERSION"
+CHART_VERSION="$CHART_VERSION"
+HOST="$HOST"
+EOF
+}
+
+# ── Env var exports for reference repo scripts ───────────────────────────────
+export_env() {
+  export CLUSTER_NAME
+  export CAMUNDA_NAMESPACE="$NAMESPACE"
+  export CAMUNDA_RELEASE_NAME="$RELEASE_NAME"
+  export CERT_DIR=".certs/"
+}
+
+# ── Clone / update reference repo ───────────────────────────────────────────
+setup_repo() {
+  local ref="$1"
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    git -C "$REPO_DIR" fetch --all --quiet
+  else
+    mkdir -p "$REPO_DIR"
+    git clone --quiet "$DEPLOY_REPO_URL" "$REPO_DIR"
+  fi
+  git -C "$REPO_DIR" checkout --quiet "$ref"
+}
+
+# ── Extract Helm chart version ───────────────────────────────────────────────
+get_chart_version() {
+  local mode="$1"
+  local script_name
+  if [[ "$mode" == "domain" ]]; then
+    script_name="$WORK_DIR/procedure/camunda-deploy-domain.sh"
+  else
+    script_name="$WORK_DIR/procedure/camunda-deploy-no-domain.sh"
+  fi
+  if [[ ! -f "$script_name" ]]; then
+    die "Could not determine Helm chart version from reference repo. Re-run with --version to specify a valid branch."
+  fi
+  local version
+  version=$(sed -n 's/.*CAMUNDA_HELM_CHART_VERSION=\([^ ]*\).*/\1/p' "$script_name" | head -1 | tr -d '"' | tr -d "'")
+  if [[ -z "$version" ]]; then
+    die "Could not determine Helm chart version from reference repo. Re-run with --version to specify a valid branch."
+  fi
+  echo "$version"
+}
+
+# ── /etc/hosts management ───────────────────────────────────────────────────
+add_hosts_entry() {
+  local hostname="$1"
+  if grep -qF "127.0.0.1 ${hostname}" /etc/hosts 2>/dev/null; then
+    return 0
+  fi
+  msg ""
+  msg "${YELLOW}csctl needs to add '127.0.0.1 ${hostname}' to /etc/hosts.${NOFORMAT}"
+  msg "${YELLOW}This requires sudo — you may be prompted for your password.${NOFORMAT}"
+  read -rp "Add entry to /etc/hosts? [y/N] " answer
+  if [[ "$answer" =~ ^[Yy]$ ]]; then
+    echo "127.0.0.1 ${hostname}" | sudo tee -a /etc/hosts >/dev/null
+    msg "  ${GREEN}✓${NOFORMAT} Added ${hostname} to /etc/hosts"
+  else
+    msg "${YELLOW}Please add the following line to /etc/hosts manually:${NOFORMAT}"
+    msg "  127.0.0.1 ${hostname}"
+  fi
+}
+
+remove_hosts_entry() {
+  local hostname="$1"
+  local escaped_hostname
+  escaped_hostname=$(printf '%s' "$hostname" | sed 's/[.[\*^$()+?{|]/\\&/g')
+  if grep -qF "127.0.0.1 ${hostname}" /etc/hosts 2>/dev/null; then
+    if sed --version >/dev/null 2>&1; then
+      sudo sed -i -E "/^127\\.0\\.0\\.1[[:space:]]+${escaped_hostname}$/d" /etc/hosts
+    else
+      sudo sed -i '' -E "/^127\\.0\\.0\\.1[[:space:]]+${escaped_hostname}$/d" /etc/hosts
+    fi
+    msg "  ${GREEN}✓${NOFORMAT} Removed ${hostname} from /etc/hosts"
+  fi
+}
+
+# ── Parse global flags from any position ─────────────────────────────────────
+parse_global_flags() {
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -v|--verbose) VERBOSE=1 ;;
+      *) args+=("$1") ;;
+    esac
+    shift
+  done
+  REMAINING_ARGS=("${args[@]+"${args[@]}"}")
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── INSTALL ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+cmd_install() {
+  # Defaults
+  MODE="domain"
+  CLUSTER_NAME="$DEFAULT_CLUSTER"
+  NAMESPACE="$DEFAULT_NAMESPACE"
+  RELEASE_NAME="$DEFAULT_RELEASE"
+  HOST="$DEFAULT_HOST"
+  VERSION="$DEFAULT_VERSION"
+  CHART_VERSION=""
+  local profiles=()
+  local extra_files=()
+
+  # Parse install flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage_install; exit 0 ;;
+      --no-domain) MODE="no-domain" ;;
+      --version) VERSION="${2:?'--version requires a value'}"; shift ;;
+      -p) profiles+=("${2:?'-p requires a profile name'}"); shift ;;
+      -f) extra_files+=("${2:?'-f requires a file path'}"); shift ;;
+      *) die "Unknown option: $1" ;;
     esac
     shift
   done
 
-  args=("$@")
+  # ── Prerequisites ──
+  local prereq_mode="domain"
+  [[ "$MODE" == "no-domain" ]] && prereq_mode="no-domain"
+  check_prerequisites "$prereq_mode"
 
-  # check required params and arguments
-  # [[ -z "${param-}" ]] && die "Missing required parameter: param"
+  msg "${BLUE}Installing Camunda 8 (${MODE} mode)${NOFORMAT}"
+  msg ""
 
-  return 0
+  # ── Clone/update reference repo ──
+  run_step "Cloning/updating deployment references (${VERSION})" setup_repo "$VERSION" \
+    || die "Failed to clone/update reference repo."
+
+  # ── Extract Helm chart version ──
+  CHART_VERSION=$(get_chart_version "$MODE") \
+    || die "Failed to extract Helm chart version."
+  if [[ "$VERBOSE" -eq 1 ]]; then
+    msg "  Helm chart version: ${CHART_VERSION}"
+  fi
+
+  # ── Helm repo setup ──
+  run_step "Setting up Helm repo" bash -c 'helm repo add camunda https://helm.camunda.io --force-update && helm repo update camunda' \
+    || die "Failed to set up Helm repo."
+
+  # ── Export env vars ──
+  export_env
+
+  # ── Kind cluster creation ──
+  run_step "Creating Kind cluster (${CLUSTER_NAME})" bash -c "cd '$WORK_DIR' && bash procedure/cluster-create.sh" \
+    || die "Failed to create Kind cluster."
+
+  # ── /etc/hosts (before certs and Helm) ──
+  if [[ "$MODE" == "domain" ]]; then
+    msg ""
+    msg "${YELLOW}⚠ The next step requires sudo access to modify /etc/hosts.${NOFORMAT}"
+    msg "${YELLOW}  You may be prompted for your password.${NOFORMAT}"
+    msg ""
+    (cd "$WORK_DIR" && bash procedure/hosts-add.sh) \
+      || die "Failed to add hosts entry."
+    complete_step "Adding hosts entry"
+  else
+    add_hosts_entry "camunda-keycloak"
+  fi
+
+  # ── Domain mode: ingress, CoreDNS, mkcert certificates ──
+  if [[ "$MODE" == "domain" ]]; then
+    run_step "Setting up ingress" bash -c "cd '$WORK_DIR' && bash procedure/ingress-nginx-deploy.sh" \
+      || die "Failed to set up ingress."
+
+    run_step "Configuring CoreDNS" bash -c "cd '$WORK_DIR' && bash procedure/coredns-config.sh" \
+      || die "Failed to configure CoreDNS."
+
+    run_step "Generating TLS certificates" bash -c "cd '$WORK_DIR' && bash procedure/certs-generate.sh" \
+      || die "Failed to generate TLS certificates."
+
+    run_step "Creating TLS secret" bash -c "cd '$WORK_DIR' && bash procedure/certs-create-secret.sh" \
+      || die "Failed to create TLS secret."
+
+    run_step "Creating CA configmap" bash -c "cd '$WORK_DIR' && bash procedure/certs-create-ca-configmap.sh" \
+      || die "Failed to create CA configmap."
+  fi
+
+  # ── Write state file ──
+  write_state
+  complete_step "State file written"
+
+  # ── Assemble Helm values files ──
+  local helm_args=()
+  helm_args+=(upgrade --install "$RELEASE_NAME" camunda/camunda-platform)
+  helm_args+=(--namespace "$NAMESPACE" --create-namespace)
+  helm_args+=(--version "$CHART_VERSION")
+
+  # 1. Reference repo base values
+  if [[ "$MODE" == "domain" ]]; then
+    helm_args+=(--values "$WORK_DIR/helm-values/values-domain.yml")
+    # 2. mkcert values (domain mode only)
+    helm_args+=(--values "$WORK_DIR/helm-values/values-mkcert.yml")
+  else
+    helm_args+=(--values "$WORK_DIR/helm-values/values-no-domain.yml")
+  fi
+
+  # 3. Profile files
+  local share_dir="${CSCTL_SHARE_DIR:-$HOME/.local/share/csctl}"
+  for profile in "${profiles[@]+"${profiles[@]}"}"; do
+    local profile_file="$CSCTL_ROOT/extra-values/${profile}.yaml"
+    if [[ ! -f "$profile_file" ]] && [[ -f "$share_dir/extra-values/${profile}.yaml" ]]; then
+      profile_file="$share_dir/extra-values/${profile}.yaml"
+    fi
+    if [[ ! -f "$profile_file" ]]; then
+      die "Profile not found: ${profile_file}"
+    fi
+    helm_args+=(--values "$profile_file")
+  done
+
+  # 4. User-supplied extra files
+  for f in "${extra_files[@]+"${extra_files[@]}"}"; do
+    if [[ ! -f "$f" ]]; then
+      die "Values file not found: ${f}"
+    fi
+    helm_args+=(--values "$f")
+  done
+
+  # ── Helm install ──
+  run_step "Installing Camunda 8 via Helm (v${CHART_VERSION})" helm "${helm_args[@]}" \
+    || die "Helm install failed."
+
+  # ── Wait for pods to be ready ──
+  local ready_script="$REPO_DIR/generic/kubernetes/single-region/procedure/check-deployment-ready.sh"
+  [[ -f "$ready_script" ]] || die "Readiness check script not found: $ready_script"
+  run_step "Waiting for pods to be ready" env CAMUNDA_NAMESPACE="$NAMESPACE" bash "$ready_script" \
+    || die "Pods did not become ready."
+
+  # ── Post-install output ──
+  msg ""
+  msg "${GREEN}✓ Camunda 8 installed successfully!${NOFORMAT}"
+  msg ""
+
+  # Print credentials
+  print_credentials_info
+
+  # Print access info
+  if [[ "$MODE" == "domain" ]]; then
+    msg "${BLUE}Access:${NOFORMAT} https://${HOST}/"
+  else
+    msg "${BLUE}Access:${NOFORMAT} Run '$CLI_NAME port-forward' to forward ports."
+    msg ""
+    msg "  Zeebe gRPC API:    http://localhost:26500"
+    msg "  Zeebe REST API:    http://localhost:8080   (Operate, Tasklist, Identity)"
+    msg "  Optimize:          http://localhost:8083"
+    msg "  Web Modeler:       http://localhost:8070"
+    msg "  Connectors:        http://localhost:8088"
+    msg "  Console:           http://localhost:8087"
+    msg "  Identity:          http://localhost:8085"
+    msg "  Keycloak:          http://localhost:18080/auth"
+  fi
 }
 
-parse_params "$@"
-setup_colors
+print_credentials_info() {
+  local get_pw_script="$WORK_DIR/procedure/get-password.sh"
+  local password
+  if [[ -f "$get_pw_script" ]]; then
+    password=$(cd "$WORK_DIR" && bash "$get_pw_script" 2>/dev/null) || true
+  fi
+  if [[ -n "${password-}" ]]; then
+    msg "${BLUE}Credentials:${NOFORMAT}"
+    msg "  Username: admin"
+    msg "  Password: ${password}"
+  else
+    msg "${YELLOW}Credentials not yet available (pods may still be starting).${NOFORMAT}"
+    msg "  Run '$CLI_NAME credentials' once pods are ready."
+  fi
+}
 
-# constants
+# ══════════════════════════════════════════════════════════════════════════════
+# ── DELETE ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+cmd_delete() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage_delete; exit 0 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+    shift
+  done
 
-REPO_NAME="urbanisierung/csctl"
-COCI_DIR="$HOME/.$CLI_NAME"
-COCI_CHECKOUT_DIR=$COCI_DIR/$CLI_NAME
-COCI_CHECKOUT_INFRA_DIR=$COCI_CHECKOUT_DIR/infra
-COCI_TLS=$COCI_DIR/tls
+  if [[ -f "$STATE_FILE" ]]; then
+    load_state
+  else
+    # No state file — try to infer from existing Kind cluster
+    CLUSTER_NAME="$DEFAULT_CLUSTER"
+    NAMESPACE="$DEFAULT_NAMESPACE"
+    RELEASE_NAME="$DEFAULT_RELEASE"
+    HOST="$DEFAULT_HOST"
+    if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+      msg "${YELLOW}No state file found. Detected Kind cluster '${CLUSTER_NAME}' — proceeding with defaults.${NOFORMAT}"
+      # Detect mode: check if keycloak hosts entry exists (no-domain indicator)
+      if grep -qF "127.0.0.1 camunda-keycloak" /etc/hosts 2>/dev/null; then
+        MODE="no-domain"
+      else
+        MODE="domain"
+      fi
+    else
+      die "No csctl state found and no Kind cluster '${CLUSTER_NAME}' detected. Nothing to delete."
+    fi
+  fi
+  export_env
 
-COCI_EXTRA_VALUES=$COCI_DIR/full.yaml
-COCI_VALUES=$COCI_DIR/values.yaml
-COCI_GITHUB=https://raw.githubusercontent.com/$REPO_NAME
-COCI_GITHUB_EXTRA_VALUES=$COCI_GITHUB/main/extra-values
-COCI_HELM_CHARTS=camunda/camunda-platform
+  msg "${BLUE}Deleting Camunda 8 installation (${MODE} mode)${NOFORMAT}"
+  msg ""
 
-###########################
-# TOOLS CHECK
-toolscheck
+  # Helm uninstall
+  run_step "Uninstalling Helm release (${RELEASE_NAME})" \
+    helm uninstall "$RELEASE_NAME" --namespace "$NAMESPACE" || \
+    die "Failed to uninstall Helm release. State file preserved at ${STATE_FILE}."
 
-###########################
-# C8 CLEANUP
+  # Kind delete cluster
+  run_step "Deleting Kind cluster (${CLUSTER_NAME})" \
+    kind delete cluster --name "$CLUSTER_NAME" || \
+    die "Failed to delete Kind cluster. State file preserved at ${STATE_FILE}."
 
-if [ $cleanup -eq 1 ]; then
-  msg "${YELLOW}Deleting cluster $cluster_name${NOFORMAT}"
-  rm -rf $COCI_CHECKOUT_INFRA_DIR/modules/*/charts $COCI_CHECKOUT_INFRA_DIR/deployments/*/charts
-  rm -rf $COCI_CHECKOUT_INFRA_DIR/repositories/*
-  kind delete cluster --name $cluster_name
-  exit
-fi
+  # /etc/hosts cleanup (called directly, not via run_step, because it prompts interactively)
+  if [[ "$MODE" == "domain" ]]; then
+    remove_hosts_entry "$HOST"
+    # Remove certs
+    if [[ -d "$WORK_DIR/.certs" ]]; then
+      rm -rf "$WORK_DIR/.certs"
+    fi
+  else
+    remove_hosts_entry "camunda-keycloak"
+  fi
+  # When no state file was present, mode detection may be wrong; clean up both
+  # possible hosts entries and certs to avoid leftovers.
+  if [[ ! -f "$STATE_FILE" ]]; then
+    remove_hosts_entry "$HOST"
+    remove_hosts_entry "camunda-keycloak"
+    if [[ -d "$WORK_DIR/.certs" ]]; then
+      rm -rf "$WORK_DIR/.certs"
+    fi
+  fi
 
-###########################
-# C8 INSTALLATION
+  # Delete state file only after successful teardown
+  rm -f "$STATE_FILE"
+  complete_step "State file removed"
 
-# prerequisites
-[[ ${#args[@]} -eq 0 ]] && die "Missing profile or extra-values file"
+  msg ""
+  msg "${GREEN}✓ Camunda 8 deleted successfully.${NOFORMAT}"
+}
 
-# determine extra values file
-if [ $profile -eq 1 ]; then
-  extra_values=$COCI_CHECKOUT_DIR/extra-values/$args.yaml
-else
-  extra_values=${args[0]}
-  COCI_VALUES=$extra_values
-fi
+# ══════════════════════════════════════════════════════════════════════════════
+# ── CREDENTIALS ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+cmd_credentials() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage_credentials; exit 0 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+    shift
+  done
 
-# script logic here
+  load_state
+  export_env
 
-msg "${PURPLE}Parameters:"
-msg "- cluster: ${cluster_name}"
-msg "- namespace: ${namespace}"
-msg "- host: ${host_name}"
-msg "- console-version: ${console_version}"
-msg "- extra-values: ${extra_values}"
-msg "- docker server: ${docker_server}"
-msg "- docker registry: ${docker_registry}"
-msg "- skip-tls: ${skip_tls}${NOFORMAT}"
+  local get_pw_script="$WORK_DIR/procedure/get-password.sh"
+  local password
+  if [[ -f "$get_pw_script" ]]; then
+    password=$(cd "$WORK_DIR" && bash "$get_pw_script" 2>/dev/null) || true
+  fi
+  if [[ -z "${password-}" ]]; then
+    die "Could not retrieve credentials. Is the cluster running?"
+  fi
 
-if [ $reset -eq 1 ]; then
-  rm -rf $COCI_CHECKOUT_DIR
-fi
+  msg "Username: admin"
+  msg "Password: ${password}"
+}
 
-if [ -d $COCI_CHECKOUT_DIR ]; then
-  msg "$CLI_NAME repo already checked out"
-else
-  msg "checking out $CLI_NAME repo"
-  mkdir -p $COCI_CHECKOUT_DIR
-  git clone https://github.com/$REPO_NAME.git $COCI_CHECKOUT_DIR
-fi
+# ══════════════════════════════════════════════════════════════════════════════
+# ── PORT-FORWARD ─────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+cmd_port_forward() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage_portforward; exit 0 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+    shift
+  done
 
-if [ $profile -eq 1 ]; then
-  # replace host name
-  msg "${YELLOW}Replacing host name. target: ${COCI_VALUES} ${NOFORMAT}"
-  sed 's/${HOST}/'"$host_name"'/g' $extra_values >${COCI_VALUES}_tmp
+  load_state
+  export_env
 
-  msg "${YELLOW}Replacing console version. target: ${COCI_VALUES} ${NOFORMAT}"
-  sed 's/${CONSOLE_VERSION}/'"$console_version"'/g' ${COCI_VALUES}_tmp >$COCI_VALUES
+  if [[ "$MODE" == "domain" ]]; then
+    msg "${YELLOW}Warning: port-forward is intended for no-domain mode. In domain mode, services are accessible via https://${HOST}/.${NOFORMAT}"
+  fi
 
-  rm ${COCI_VALUES}_tmp
-fi
+  msg "${BLUE}Starting port-forward...${NOFORMAT}"
+  cd "$WORK_DIR"
+  bash procedure/port-forward.sh
+}
 
-# unreleased helm charts
-if [ $unreleased -eq 1 ]; then
-  msg "${YELLOW}using unreleased helm charts${NOFORMAT}"
-  mkdir -p $COCI_CHECKOUT_INFRA_DIR/repositories
-  git clone https://github.com/camunda/camunda-platform-helm.git $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm
-  make -C $COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm helm.dependency-update
-  COCI_HELM_CHARTS=$COCI_CHECKOUT_INFRA_DIR/repositories/camunda-platform-helm/charts/camunda-platform-alpha
-fi
 
-# cluster
-msg "${YELLOW}creating cluster${NOFORMAT}"
-kind create cluster --config $COCI_CHECKOUT_INFRA_DIR/clusters/kind/kind-cluster-config.yaml --name $cluster_name
+# ══════════════════════════════════════════════════════════════════════════════
+# ── UPDATE ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+cmd_update() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        cat <<EOF
+Usage: $CLI_NAME update [flags]
 
-# infra
-msg "${YELLOW}setting up infra${NOFORMAT}"
-kubectl kustomize --enable-helm $COCI_CHECKOUT_INFRA_DIR/modules/ingress-nginx | kubectl apply -f -
-kubectl create namespace $namespace
-kubectl config set-context --current --namespace=$namespace
+Updates csctl to the latest version by pulling the newest changes from the
+repository.
 
-if [ $skip_tls -eq 0 ]; then
-  msg "${YELLOW}Generating TLS certificate${NOFORMAT}"
-  mkdir -p $COCI_TLS
-  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout $COCI_TLS/c8-key.key -out $COCI_TLS/c8-cert.pem
-  kubectl -n $namespace create secret tls camunda-platform \
-    --cert=$COCI_TLS/c8-cert.pem \
-    --key=$COCI_TLS/c8-key.key
-fi
+Flags:
+  -v, --verbose   Show full output
+  -h, --help      Show this help
+EOF
+        exit 0 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+    shift
+  done
 
-# check if envvars exist
-if compgen -v | grep -q CAMUNDA_REG_USER && compgen -v | grep -q CAMUNDA_REG_PASS; then
-  msg "${YELLOW}Setting up Docker registry $docker_server credentials${NOFORMAT}"
-  kubectl -n $namespace create secret docker-registry $docker_registry \
-    --namespace $namespace \
-    --docker-server "$docker_server" \
-    --docker-username "$CAMUNDA_REG_USER" \
-    --docker-password "$CAMUNDA_REG_PASS"
-else
-  msg "${RED}Docker registry credentials not set. Enterprise components will not be fetched.${NOFORMAT}"
-fi
+  if [[ ! -d "$CSCTL_ROOT/.git" ]]; then
+    die "Cannot update: csctl was not installed from a git repository.\nRe-install with:\n  curl -fsSL https://raw.githubusercontent.com/urbanisierung/csctl/main/install.sh | bash"
+  fi
 
-# TLS
-if [ $tls -eq 1 ]; then
-  msg "${YELLOW}Generating TLS certificate for Console${NOFORMAT}"
-  mkdir -p $COCI_TLS
-  openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj "/C=US/ST=C8/L=Theland/O=C8/CN=$host_name" -keyout $COCI_TLS/console-key.key -out $COCI_TLS/console-cert.pem
-  kubectl create configmap ssl-certs-certificate --from-file=$COCI_TLS/console-cert.pem -n $namespace
-  kubectl create configmap ssl-certs-key --from-file=$COCI_TLS/console-key.key -n $namespace
-fi
+  msg "${BLUE}Updating csctl...${NOFORMAT}"
 
-# c8
-msg "${YELLOW}installing c8 ($COCI_HELM_CHARTS)${NOFORMAT}"
-if [ -n "$helm_version" ]; then
-  helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests --version "$helm_version" | kubectl apply -n $namespace -f -
-else
-  helm template camunda-platform $COCI_HELM_CHARTS --values $COCI_VALUES --skip-tests | kubectl apply -n $namespace -f -
-fi
+  if ! git -C "$CSCTL_ROOT" diff --quiet 2>/dev/null || ! git -C "$CSCTL_ROOT" diff --cached --quiet 2>/dev/null; then
+    die "Working tree has uncommitted changes. Please commit or stash them before updating."
+  fi
 
-# enjoy
-if ! command -v watch >/dev/null 2>&1
-then
-  echo "watch could not be found"
-  kubectl get pods
-else
-  watch kubectl get pods
-fi
+  local current_ref
+  current_ref=$(git -C "$CSCTL_ROOT" rev-parse --short HEAD)
 
-msg "${BLUE}Camunda 8 installation done:"
-msg "- cluster: ${cluster_name}"
-msg "- namespace: ${namespace}"
-msg "- host: ${host_name}"
-msg "- Open console: https://${host_name}"
-msg "${ORANGE}Make sure to add the following entry to your /etc/hosts or /private/etc/hosts file:"
-msg "127.0.0.1       ${host_name}"
+  run_step "Fetching latest changes" git -C "$CSCTL_ROOT" fetch --all --quiet \
+    || die "Failed to fetch updates."
+
+  run_step "Applying updates" git -C "$CSCTL_ROOT" pull --ff-only --quiet \
+    || die "Failed to apply updates. Local commits may have diverged from origin/main."
+
+  local new_ref
+  new_ref=$(git -C "$CSCTL_ROOT" rev-parse --short HEAD)
+
+  msg ""
+  if [[ "$current_ref" == "$new_ref" ]]; then
+    msg "${GREEN}✓ csctl is already up to date (${new_ref}).${NOFORMAT}"
+  else
+    msg "${GREEN}✓ csctl updated: ${current_ref} → ${new_ref}${NOFORMAT}"
+  fi
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── MAIN ─────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+main() {
+  # Handle empty invocation — default to install
+  if [[ $# -eq 0 ]]; then
+    cmd_install
+    return
+  fi
+
+  # Extract global flags first, preserving subcommand and its flags
+  parse_global_flags "$@"
+  set -- "${REMAINING_ARGS[@]+"${REMAINING_ARGS[@]}"}"
+
+  # Handle top-level help
+  if [[ $# -eq 0 ]]; then
+    # Only -v was passed, default to install with verbose
+    cmd_install
+    return
+  fi
+
+  local command="$1"
+  shift
+
+  case "$command" in
+    install)      cmd_install "$@" ;;
+    delete)       cmd_delete "$@" ;;
+    credentials)  cmd_credentials "$@" ;;
+    port-forward) cmd_port_forward "$@" ;;
+    update)       cmd_update "$@" ;;
+    -h|--help)    usage; exit 0 ;;
+    # If first arg looks like an install flag, pass everything to install
+    --no-domain|--version|-p|-f)
+      cmd_install "$command" "$@" ;;
+    -*)
+      die "Unknown option: ${command}. Run '$CLI_NAME --help' for usage." ;;
+    *)
+      die "Unknown command: ${command}. Run '$CLI_NAME --help' for usage." ;;
+  esac
+}
+
+main "$@"
