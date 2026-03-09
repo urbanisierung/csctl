@@ -155,6 +155,7 @@ Usage: $CLI_NAME install [flags]
 Flags:
   --no-domain          Use no-domain (port-forward) mode instead of domain mode
   --version <ref>      Git ref for camunda-deployment-references (default: $DEFAULT_VERSION)
+  --registry-secret    Create docker-registry secret using CAMUNDA_REG_USER and CAMUNDA_REG_PASS env vars
   -p <profile>         Profile from extra-values/ (repeatable)
   -f <file>            Additional Helm values file (repeatable)
   -v, --verbose        Show full output
@@ -328,6 +329,7 @@ cmd_install() {
   CHART_VERSION=""
   local profiles=()
   local extra_files=()
+  local create_registry_secret=0
 
   # Parse install flags
   while [[ $# -gt 0 ]]; do
@@ -335,6 +337,7 @@ cmd_install() {
       -h|--help) usage_install; exit 0 ;;
       --no-domain) MODE="no-domain" ;;
       --version) VERSION="${2:?'--version requires a value'}"; shift ;;
+      --registry-secret) create_registry_secret=1 ;;
       -p) profiles+=("${2:?'-p requires a profile name'}"); shift ;;
       -f) extra_files+=("${2:?'-f requires a file path'}"); shift ;;
       *) die "Unknown option: $1" ;;
@@ -442,6 +445,23 @@ cmd_install() {
     fi
     helm_args+=(--values "$f")
   done
+
+  # ── Create registry secret (if requested) ──
+  if [[ "$create_registry_secret" -eq 1 ]]; then
+    if [[ -z "${CAMUNDA_REG_USER:-}" || -z "${CAMUNDA_REG_PASS:-}" ]]; then
+      die "--registry-secret requires CAMUNDA_REG_USER and CAMUNDA_REG_PASS environment variables to be set."
+    fi
+    run_step "Creating namespace ${NAMESPACE}" bash -c "kubectl create namespace '$NAMESPACE' --dry-run=client -o yaml | kubectl apply -f -" \
+      || die "Failed to create namespace."
+    run_step "Creating registry secret (registry-camunda-cloud)" bash -c "
+      kubectl create secret docker-registry registry-camunda-cloud \\
+        --docker-server=registry.camunda.cloud \\
+        --docker-username=\"\$CAMUNDA_REG_USER\" \\
+        --docker-password=\"\$CAMUNDA_REG_PASS\" \\
+        --namespace=\"$NAMESPACE\" \\
+        --dry-run=client -o yaml | kubectl apply -f -
+    " || die "Failed to create registry secret."
+  fi
 
   # ── Helm install ──
   run_step "Installing Camunda 8 via Helm (v${CHART_VERSION})" helm "${helm_args[@]}" \

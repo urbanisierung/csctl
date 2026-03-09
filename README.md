@@ -69,6 +69,7 @@ Running `csctl` with no command is equivalent to `csctl install`.
 |------|------|---------|-------------|
 | `--no-domain` | boolean | `false` | Use no-domain (port-forward) mode instead of domain mode |
 | `--version <ref>` | string | `stable/8.8` | Git branch/tag of `camunda-deployment-references` to check out |
+| `--registry-secret` | boolean | `false` | Create docker-registry secret using `CAMUNDA_REG_USER` and `CAMUNDA_REG_PASS` env vars |
 | `-p <profile>` | string | _(none)_ | Profile from `extra-values/` (repeatable) |
 | `-f <file>` | string | _(none)_ | Additional Helm values file (repeatable) |
 
@@ -89,6 +90,11 @@ csctl install --version stable/8.7 -f my-overrides.yaml
 
 # Combine profiles and extra values files
 csctl install -p console -p console-noauth -f my-overrides.yaml
+
+# Install with private registry credentials (uses CAMUNDA_REG_USER and CAMUNDA_REG_PASS env vars)
+export CAMUNDA_REG_USER=myuser
+export CAMUNDA_REG_PASS=mypassword
+csctl install -p console-harbor --registry-secret
 
 # Print Keycloak admin credentials
 csctl credentials

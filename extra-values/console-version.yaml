@@ -1,0 +1,7 @@
+console:
+  image:
+    registry: "registry.camunda.cloud"
+    repository: "team-console/console-sm"
+    tag: pr-7283
+    pullSecrets:
+      - name: registry-camunda-cloud
